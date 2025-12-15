@@ -1,0 +1,221 @@
+<!-- html/popup.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      /* 保持与 Options 一致的配色 */
+      --primary: #0ea5e9;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      
+      --bg-body: #f8fafc;
+      --bg-card: #ffffff;
+      
+      --text-main: #0f172a;
+      --text-sub: #64748b;
+      --border: #e2e8f0;
+      
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --radius: 12px;
+    }
+
+    /* 深色模式 */
+    html[data-theme="dark"] {
+      --primary: #38bdf8;
+      --bg-body: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f1f5f9;
+      --text-sub: #94a3b8;
+      --border: #334155;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    }
+
+    body {
+        width: 340px; 
+        height: 520px; 
+        margin: 0; 
+        padding: 0;
+        overflow-x: hidden; 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg-body); 
+        color: var(--text-main);
+        display: flex; 
+        flex-direction: column;
+    }
+
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    /* 顶部导航 */
+    .header {
+      padding: 16px 20px; background: var(--bg-card);
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--border); z-index: 10;
+    }
+    .brand { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 8px; color: var(--text-main); letter-spacing: -0.5px; }
+
+    /* 下拉菜单 */
+    .server-wrapper { position: relative; }
+    .server-select {
+      appearance: none; background: var(--bg-body); color: var(--text-main);
+      border: 1px solid var(--border); border-radius: 20px;
+      padding: 6px 32px 6px 12px; font-size: 12px; font-weight: 600;
+      cursor: pointer; outline: none; transition: 0.2s; max-width: 140px;
+      text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+    }
+    .server-select:hover { border-color: var(--primary); background: var(--bg-card); }
+    .server-select:focus { box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2); border-color: var(--primary); }
+    .server-arrow {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      pointer-events: none; font-size: 10px; color: var(--text-sub);
+    }
+
+    /* 内容区域 */
+    .content {
+      flex: 1; padding: 20px; overflow-y: auto;
+      display: flex; flex-direction: column; align-items: center;
+    }
+
+    /* 状态圆环区域 */
+    .domain-info {
+      width: 100%; text-align: center; margin-bottom: 24px;
+      padding: 24px 20px; background: var(--bg-card); border-radius: var(--radius);
+      box-shadow: var(--shadow); border: 1px solid var(--border);
+      position: relative; overflow: hidden;
+    }
+    .status-ring {
+      width: 64px; height: 64px; margin: 0 auto 12px;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 30px; background: var(--bg-body);
+      position: relative; z-index: 1;
+      transition: all 0.3s ease;
+    }
+    .status-ring::after {
+      content: ''; position: absolute; top: -6px; left: -6px; right: -6px; bottom: -6px;
+      border-radius: 50%; z-index: -1; opacity: 0.3;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0% { transform: scale(1); opacity: 0.4; } 70% { transform: scale(1.25); opacity: 0; } 100% { transform: scale(1); opacity: 0; } }
+
+    .domain { font-size: 16px; font-weight: 700; word-break: break-all; margin-bottom: 6px; line-height: 1.4; color: var(--text-main); }
+    .routing-tag {
+      display: inline-block; padding: 4px 10px; border-radius: 6px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+      background: var(--bg-body); color: var(--text-sub);
+    }
+
+    /* 状态颜色适配 */
+    .status-proxy .status-ring { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+    .status-proxy .status-ring::after { background: var(--success); }
+    .status-proxy .domain { color: var(--success); }
+    
+    .status-direct .status-ring { background: rgba(14, 165, 233, 0.1); color: var(--primary); }
+    .status-direct .status-ring::after { background: var(--primary); }
+    .status-direct .domain { color: var(--primary); }
+
+    .status-fail .status-ring { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+    .status-fail .status-ring::after { background: var(--danger); }
+
+    /* 模式切换 */
+    .mode-label {
+      width: 100%; text-align: left; font-size: 12px; font-weight: 700; 
+      color: var(--text-sub); margin-bottom: 10px; padding-left: 4px; letter-spacing: 0.5px;
+    }
+    .mode-group {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; width: 100%; margin-bottom: 24px;
+    }
+    .mode-btn {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 12px 4px; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      color: var(--text-sub); gap: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .mode-btn span { font-size: 22px; filter: grayscale(100%); transition: 0.2s; opacity: 0.7; }
+    .mode-btn div { font-size: 11px; font-weight: 600; }
+    
+    .mode-btn:hover { transform: translateY(-2px); border-color: var(--primary); color: var(--primary); }
+    .mode-btn:hover span { filter: none; opacity: 1; }
+    
+    .mode-btn.active { background: var(--bg-card); border-color: transparent; box-shadow: 0 0 0 2px var(--primary); color: var(--text-main); }
+    .mode-btn.active span { filter: none; transform: scale(1.1); opacity: 1; }
+    
+    #mode-pac.active { box-shadow: 0 0 0 2px var(--primary); color: var(--primary); } 
+    #mode-fixed.active { box-shadow: 0 0 0 2px var(--success); color: var(--success); }
+    #mode-direct.active { box-shadow: 0 0 0 2px var(--text-sub); color: var(--text-sub); }
+
+    /* 操作区 */
+    #actionArea { width: 100%; margin-top: auto; }
+    .btn-action {
+      width: 100%; padding: 12px; border-radius: var(--radius); border: none;
+      font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .btn-action:active { transform: scale(0.98); }
+    
+    .btn-add { background: var(--primary); color: white; box-shadow: 0 4px 10px rgba(14, 165, 233, 0.3); }
+    .btn-add:hover { background: var(--primary-hover); }
+    
+    .btn-remove { background: var(--bg-card); color: var(--danger); border: 1px solid var(--border); }
+    .btn-remove:hover { background: #fee2e2; border-color: #fca5a5; }
+
+    /* 底部 */
+    .footer {
+      padding: 12px; background: var(--bg-card); border-top: 1px solid var(--border);
+      text-align: center; font-size: 12px; font-weight: 600; color: var(--text-sub);
+      cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .footer:hover { background: var(--bg-body); color: var(--primary); }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="header">
+      <div class="brand"><img src="../assets/icon.png" style="width:24px; height:24px;"> ProxySwitch</div>
+      <div class="server-wrapper">
+        <select id="serverSelect" class="server-select"></select>
+        <span class="server-arrow">▼</span>
+      </div>
+    </div>
+    
+    <div class="content">
+      <div class="domain-info" id="domainArea" style="display:none;">
+        <div id="statusRing" class="status-ring"><span id="statusIcon">🚀</span></div>
+        <div id="currentDomain" class="domain">google.com</div>
+        <div id="routingStatus" class="routing-tag">检测中...</div>
+      </div>
+
+      <div class="mode-label">代理模式</div>
+      <div class="mode-group">
+        <div class="mode-btn" id="mode-pac"><span>🤖</span><div>自动分流</div></div>
+        <div class="mode-btn" id="mode-fixed"><span>🚀</span><div>全局代理</div></div>
+        <div class="mode-btn" id="mode-direct"><span>🛡️</span><div>直接连接</div></div>
+      </div>
+      
+      <div id="actionArea">
+        <button id="addRuleBtn" class="btn-action btn-add" style="display:none;">
+          <span style="font-size:16px">+</span> 加入代理列表
+        </button>
+        <button id="removeBtn" class="btn-action btn-remove" style="display:none;">
+          <span>🗑️</span> 移除此规则
+        </button>
+      </div>
+    </div>
+    
+    <div class="footer" id="openSettings">
+      <span style="font-size:14px">⚙️</span> 打开设置中心
+    </div>
+  </div>
+
+  <script src="../js/popup.js"></script>
+</body>
+</html>

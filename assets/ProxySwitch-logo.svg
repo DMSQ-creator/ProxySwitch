@@ -1,0 +1,29 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- 定义渐变色: 科技蓝 -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00f2fe;stop-opacity:1" />
+    </linearGradient>
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="1" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge> 
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 背景: 圆角矩形 -->
+  <rect x="0" y="0" width="128" height="128" rx="28" ry="28" fill="url(#bgGradient)" />
+
+  <!-- 图标: 环形切换箭头 (白色 + 投影) -->
+  <g fill="#ffffff" filter="url(#dropShadow)" transform="translate(24, 24) scale(0.625)">
+     <path d="M64,12 C35.3,12 12,35.3 12,64 C12,74.8 15.3,84.9 21,93.4 L31.6,82.8 C28.7,77.2 27,70.8 27,64 C27,43.6 43.6,27 64,27 C84.4,27 101,43.6 101,64 L86,64 L114,92 L142,64 L127,64 L127,64 C127,29.2 98.8,1 64,1 Z" />
+     <path d="M64,116 C92.7,116 116,92.7 116,64 C116,53.2 112.7,43.1 107,34.6 L96.4,45.2 C99.3,50.8 101,57.2 101,64 C101,84.4 84.4,101 64,101 C43.6,101 27,84.4 27,64 L42,64 L14,36 L-14,64 L1,64 L1,64 C1,98.8 29.2,127 64,127 Z" transform="rotate(180 64 64)"/>
+  </g>
+</svg>

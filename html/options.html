@@ -1,0 +1,305 @@
+<!-- html/options.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ProxySwitch 设置中心</title>
+  <style>
+    :root {
+      /* --- 核心色调：科技蓝 --- */
+      --primary: #0ea5e9;        /* Sky-500 */
+      --primary-hover: #0284c7;  /* Sky-600 */
+      --primary-light: #e0f2fe;  /* Sky-100 */
+      
+      /* --- 背景与文字：冷灰系 --- */
+      --bg-body: #f1f5f9;        /* Slate-100 */
+      --bg-sidebar: #ffffff;     /* White */
+      --bg-card: #ffffff;
+      
+      --text-main: #0f172a;      /* Slate-900 */
+      --text-sub: #64748b;       /* Slate-500 */
+      --border: #e2e8f0;         /* Slate-200 */
+      
+      /* --- 功能色 --- */
+      --danger: #ef4444; 
+      --success: #10b981; 
+      --warning: #f59e0b;
+      
+      /* --- 细节参数 --- */
+      --radius: 12px;
+      --radius-sm: 6px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    /* --- 深色模式适配 --- */
+    html[data-theme="dark"] {
+      --primary: #38bdf8;
+      --primary-hover: #7dd3fc;
+      --primary-light: rgba(56, 189, 248, 0.15);
+      
+      --bg-body: #0f172a;
+      --bg-sidebar: #1e293b;
+      --bg-card: #1e293b;
+      
+      --text-main: #f1f5f9;
+      --text-sub: #94a3b8;
+      --border: #334155;
+      
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+      --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    }
+
+    body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-body); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+    
+    /* 侧边栏 */
+    .app-sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px 16px; gap: 8px; z-index: 10; }
+    .brand { padding: 0 12px 30px; font-size: 20px; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 12px; letter-spacing: -0.5px; }
+    .menu { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+    .menu-item { padding: 12px 16px; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: var(--text-sub); transition: 0.2s; }
+    .menu-item:hover { background: var(--bg-body); color: var(--text-main); }
+    .menu-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+    .menu-footer { margin-top: auto; padding: 20px 0; font-size: 12px; color: var(--text-sub); text-align: center; opacity: 0.7; }
+    
+    /* 主内容区 */
+    .app-main { flex: 1; overflow-y: auto; padding: 40px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .section { display: none; animation: fadeIn 0.3s ease; }
+    .section.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: 0; } }
+    
+    h2 { margin: 0 0 24px 0; font-size: 24px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; justify-content: space-between; }
+    
+    /* 卡片样式 */
+    .card { background: var(--bg-card); border-radius: var(--radius); box-shadow: var(--shadow-card); border: 1px solid var(--border); padding: 24px; margin-bottom: 24px; transition: 0.2s; }
+    html[data-theme="dark"] .card { border: 1px solid rgba(255,255,255,0.05); }
+
+    /* 表单元素 */
+    .form-group { margin-bottom: 20px; }
+    label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; }
+    input[type="text"], input[type="password"], input[type="number"], select { width: 100%; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-body); color: var(--text-main); font-size: 14px; box-sizing: border-box; transition: 0.2s; }
+    input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+    
+    /* 按钮 */
+    .btn { padding: 10px 20px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    
+    .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(14, 165, 233, 0.3); }
+    .btn-primary:hover { background: var(--primary-hover); box-shadow: 0 4px 8px rgba(14, 165, 233, 0.4); transform: translateY(-1px); }
+    
+    .btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+    .btn-ghost:hover { border-color: var(--text-sub); background: var(--bg-body); }
+    
+    .btn-success { background: var(--success); color: #fff; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3); }
+    
+    /* 服务器列表 */
+    #serverListContainer { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .server-item { background: var(--bg-body); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; cursor: pointer; transition: all 0.2s; position: relative; }
+    .server-item:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: var(--shadow-sm); }
+    .server-item.active { border-color: var(--primary); background: var(--primary-light); }
+    .server-item.active .server-name { color: var(--primary); }
+    
+    /* 规则列表 */
+    .rule-toolbar { display: flex; gap: 10px; margin-bottom: 15px; background: var(--bg-body); padding: 10px; border-radius: var(--radius-sm); }
+    .rule-list { height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); }
+    .rule-item { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; font-family: monospace; font-size: 13px; align-items: center; }
+    .rule-item:hover { background: var(--bg-body); }
+    
+    /* 其他组件 */
+    .info-tip { background: var(--primary-light); color: var(--primary); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px; line-height: 1.5; margin-bottom: 20px; border: 1px solid rgba(14, 165, 233, 0.2); }
+    .help-text { font-size: 12px; color: var(--text-sub); margin-top: 6px; }
+    .server-tag { font-size: 10px; font-weight: 700; background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 4px; }
+    
+    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(50px); background: #0f172a; color: #fff; padding: 10px 24px; border-radius: 50px; font-size: 14px; font-weight: 500; opacity: 0; transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 10px 25px rgba(0,0,0,0.2); z-index: 100; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    
+    /* 滚动条美化 */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    ::-webkit-scrollbar-track { background: transparent; }
+  </style>
+</head>
+<body>
+
+  <aside class="app-sidebar">
+    <div class="brand"><img src="../assets/icon.png" style="width:32px; height:32px;">  ProxySwitch</div>
+    <ul class="menu">
+      <li class="menu-item active" data-target="server"><span>📡</span> 服务器配置</li>
+      <li class="menu-item" data-target="rules"><span>📝</span> 规则管理</li>
+      <li class="menu-item" data-target="gfw"><span>🌏</span> GFWList</li>
+      <li class="menu-item" data-target="sync"><span>☁️</span> 云端同步</li>
+      <li class="menu-item" data-target="about"><span>⚙️</span> 通用设置</li>
+    </ul>
+    <div class="menu-footer">Version 7.4 Pro</div>
+  </aside>
+
+  <main class="app-main">
+    <div class="container">
+      
+      <!-- 服务器配置 -->
+      <div id="section-server" class="section active">
+        <h2>
+          代理服务器
+          <div style="display:flex; gap:10px;">
+            <button id="testLatencyBtn" class="btn btn-ghost btn-sm">📶 测试延迟</button>
+            <button id="addServerBtn" class="btn btn-primary btn-sm">➕ 新建服务器</button>
+          </div>
+        </h2>
+        <div id="latencyResult" style="margin-bottom:15px; padding:10px; border-radius:8px; background:var(--bg-body); display:none; text-align:center;"></div>
+        
+        <div id="serverListContainer"></div>
+
+        <div id="serverForm" class="card" style="display:none; margin-top:20px; border:2px dashed var(--primary);">
+          <h3 style="margin-top:0;">编辑服务器</h3>
+          <div style="display:grid; grid-template-columns: 2fr 1fr; gap:15px; margin-bottom:15px;">
+            <div><label>备注名称</label><input type="text" id="editName" placeholder="例如: 香港节点 01"></div>
+            <div><label>协议类型</label><select id="editScheme"><option value="SOCKS5">SOCKS5</option><option value="HTTP">HTTP</option></select></div>
+          </div>
+          <div style="display:grid; grid-template-columns: 3fr 1fr; gap:15px; margin-bottom:20px;">
+            <div><label>服务器地址 (IP/域名)</label><input type="text" id="editHost" placeholder="127.0.0.1"></div>
+            <div><label>端口</label><input type="number" id="editPort" placeholder="1080"></div>
+          </div>
+          <div style="text-align:right;">
+            <button id="cancelServerItemBtn" class="btn btn-ghost">取消</button>
+            <button id="saveServerItemBtn" class="btn btn-primary">保存配置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 规则管理 -->
+      <div id="section-rules" class="section">
+        <h2>规则管理</h2>
+        <div class="card">
+          <div style="display:flex; margin-bottom:15px;">
+             <select id="ruleTypeSelect" style="flex:1; padding:12px; font-weight:bold; border-radius:var(--radius-sm); border-color:var(--border);">
+              <option value="userRules">🚀 黑名单 (强制代理域名)</option>
+              <option value="userWhitelist">🛡️ 白名单 (强制直连域名)</option>
+            </select>
+          </div>
+          
+          <div class="rule-toolbar">
+            <input type="text" id="ruleSearch" placeholder="🔍 搜索域名..." style="flex:1; background:var(--bg-card);">
+            <input type="text" id="ruleAddInput" placeholder="输入域名回车添加" style="flex:1; background:var(--bg-card);">
+            <button id="ruleAddBtn" class="btn btn-primary btn-sm">添加</button>
+          </div>
+          
+          <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:12px; color:var(--text-sub);">
+            <span>共 <b id="currentRuleCount">0</b> 条规则</span>
+            <span>操作: 双击修改 | 右侧删除</span>
+          </div>
+
+          <div class="rule-list" id="ruleListContainer"></div>
+
+          <div style="display:flex; justify-content:space-between; margin-top:15px;">
+            <div style="display:flex; gap:10px;">
+              <button id="ruleExportBtn" class="btn btn-ghost btn-sm">📤 导出</button>
+              <button id="ruleImportBtn" class="btn btn-ghost btn-sm">📥 导入</button>
+              <input type="file" id="ruleFile" style="display:none" accept=".json">
+            </div>
+            <button id="ruleClearBtn" class="btn btn-ghost btn-sm" style="color:var(--danger)">🗑️ 清空列表</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- GFWList -->
+      <div id="section-gfw" class="section">
+        <h2>GFWList 智能规则库</h2>
+        <div class="card">
+          <div class="info-tip">
+             💡 GFWList 是一个维护在 GitHub 上的被墙网站列表。启用后，插件会自动判断访问的域名是否在列表中，在则代理，不在则直连。
+          </div>
+          <div class="form-group">
+            <label>规则源地址</label>
+            <select id="gfwSourceSelect">
+              <option value="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt">GitHub Official (需要代理)</option>
+              <option value="https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt">jsDelivr CDN (推荐，速度快)</option>
+              <option value="custom">自定义 URL...</option>
+            </select>
+            <input type="text" id="gfwUrlInput" placeholder="输入 URL" style="display:none; margin-top:10px;">
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm);">
+            <div>
+              <div style="font-weight:600; font-size:14px;">当前状态</div>
+              <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">未加载</div>
+            </div>
+            <button id="updateGfwBtn" class="btn btn-success">🔄 立即更新规则库</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 云同步 -->
+      <div id="section-sync" class="section">
+        <h2>云端同步 <span id="syncStatusBadge" class="server-tag" style="background:#ccc; color:#fff; margin-left:10px;">未同步</span></h2>
+        <div class="card">
+          <div class="form-group">
+            <label>同步服务提供商</label>
+            <div style="display:flex; gap:15px;">
+              <select id="syncProvider" style="flex:1">
+                <option value="github">GitHub Gist (推荐，稳定免费)</option>
+                <option value="webdav">WebDAV (坚果云/Nextcloud)</option>
+              </select>
+              <div style="display:flex; align-items:center;">
+                <input type="checkbox" id="autoSync" style="width:auto; margin-right:8px;">
+                <span style="font-size:13px;">自动同步 (每24h)</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="info-tip" style="background:var(--bg-body); color:var(--text-sub); border:1px solid var(--border);">
+            ❕ 提示：上传的数据仅做 <b>Base64 编码</b> 混淆处理。
+          </div>
+
+          <div id="panelGithub" style="background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
+            <div class="form-group">
+              <label>GitHub Token (Personal Access Token)</label>
+              <input type="password" id="gitToken" placeholder="ghp_xxxxxxxxxxxx...">
+              <p class="help-text">请在 GitHub Settings -> Developer Settings 生成 Token，勾选 'gist' 权限。</p>
+            </div>
+          </div>
+
+          <div id="panelWebdav" style="display:none; background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
+            <div class="form-group"><label>服务器地址</label><input type="text" id="davUrl" placeholder="https://dav.jianguoyun.com/dav/"></div>
+            <div style="display:flex; gap:10px;">
+              <div style="flex:1"><label>账号</label><input type="text" id="davUser"></div>
+              <div style="flex:1"><label>密码</label><input type="password" id="davPass"></div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:center; gap:20px;">
+             <button id="cloudUploadBtn" class="btn btn-primary" style="width:160px; justify-content:center;">⬆️ 上传配置</button>
+             <button id="cloudDownloadBtn" class="btn btn-ghost" style="width:160px; justify-content:center;">⬇️ 下载覆盖</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 通用设置 -->
+      <div id="section-about" class="section">
+        <h2>通用设置</h2>
+        <div class="card">
+          <div class="form-group">
+            <label>界面主题</label>
+            <select id="themeSelect">
+              <option value="system">🖥️ 跟随系统设置</option>
+              <option value="light">🌞 浅色模式</option>
+              <option value="dark">🌙 深色模式</option>
+            </select>
+          </div>
+        </div>
+        <div class="card" style="border-color:rgba(239, 68, 68, 0.3);">
+          <h3 style="color:var(--danger); margin-top:0;">危险区域</h3>
+          <p class="help-text" style="margin-bottom:15px;">如果您遇到严重错误，可以尝试重置扩展。这将清除所有本地规则和服务器配置。</p>
+          <button id="resetAppBtn" class="btn btn-danger">🔥 重置所有数据</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <div id="toast">操作成功</div>
+  <script src="../js/options.js"></script>
+</body>
+</html>
