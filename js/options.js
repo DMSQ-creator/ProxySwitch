@@ -1,4 +1,4 @@
-// js/options.js - ProxySwitch v7.4.0
+// js/options.js - ProxySwitch v7.4.1
 
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
 // [修改] 更改为 Google 官方连通性测试地址，HTTP 协议避免部分证书问题，返回 204 无内容
@@ -73,6 +73,15 @@ function initServerModule() {
   $('#saveServerItemBtn').onclick = saveServer;
   
   $('#testLatencyBtn').onclick = async () => {
+    // 新增：检查当前是否正在使用代理
+    const config = await new Promise(r => chrome.proxy.settings.get({}, r));
+    const mode = config.value.mode;
+    
+    if (mode === 'direct' || mode === 'system') {
+      if (!confirm("⚠️ 警告：当前处于 [直连] 或 [系统代理] 模式。\n测试结果将反映本地网络连接速度，而非代理服务器速度。\n\n是否继续？")) {
+        return;
+      }
+    }
     const resEl = $('#latencyResult');
     resEl.style.display = 'block';
     resEl.innerHTML = '<span style="color:var(--text-sub)">⏳ 正在连接测试服务器...</span>';
@@ -268,34 +277,45 @@ function checkConflict(domain) {
   return null;
 }
 
-function renderRuleList() {
-  const list = allData[currentRuleType] || [];
-  const keyword = $('#ruleSearch').value.trim().toLowerCase();
-  const filtered = list.filter(d => d.includes(keyword)).reverse();
-  $('#currentRuleCount').textContent = list.length;
-  
-  const container = $('#ruleListContainer');
-  container.innerHTML = '';
-  
-  const displayList = filtered.slice(0, MAX_DISPLAY_RULES);
-  const fragment = document.createDocumentFragment();
-  
+  function renderRuleList() {
+    const list = allData[currentRuleType] || [];
+    const keyword = $('#ruleSearch').value.trim().toLowerCase();
+    const filtered = list.filter(d => d.includes(keyword)).reverse();
+    $('#currentRuleCount').textContent = list.length;
+    
+    const container = $('#ruleListContainer');
+    container.innerHTML = '';
+    
+    const displayList = filtered.slice(0, MAX_DISPLAY_RULES);
+    const fragment = document.createDocumentFragment();
+
+  // 遍历每一条域名规则
   displayList.forEach(domain => {
-    const div = document.createElement('div');
-    div.className = 'rule-item';
-    div.innerHTML = `
-      <span class="domain-text" title="双击修改">${domain}</span>
-      <div style="display:flex; align-items:center;">
+      const div = document.createElement('div');
+      div.className = 'rule-item';      
+      const span = document.createElement('span');
+      span.className = 'domain-text';
+      span.title = '双击修改';      
+      span.textContent = domain; 
+      const actionDiv = document.createElement('div');
+      actionDiv.style.cssText = "display:flex; align-items:center;";      
+      actionDiv.innerHTML = `
         <span class="edit-hint" style="font-size:12px; color:#aaa; margin-right:10px; opacity:0; transition:0.2s;">双击修改</span>
         <button class="btn btn-ghost btn-sm btn-del" style="border:none; padding:2px 6px;">✕</button>
-      </div>
-    `;
-    div.onmouseenter = () => div.querySelector('.edit-hint').style.opacity = '1';
-    div.onmouseleave = () => div.querySelector('.edit-hint').style.opacity = '0';
-    div.ondblclick = () => enableRuleEdit(div, domain);
-    div.querySelector('.btn-del').onclick = (e) => { e.stopPropagation(); deleteRule(domain); };
-    fragment.appendChild(div);
+      `;
+      div.appendChild(span);
+      div.appendChild(actionDiv);
+      div.onmouseenter = () => actionDiv.querySelector('.edit-hint').style.opacity = '1';
+      div.onmouseleave = () => actionDiv.querySelector('.edit-hint').style.opacity = '0';      
+      div.ondblclick = () => enableRuleEdit(div, domain);      
+      actionDiv.querySelector('.btn-del').onclick = (e) => { 
+        e.stopPropagation(); // 防止触发双击事件
+        deleteRule(domain); 
+      };
+      fragment.appendChild(div);
   });
+
+  // --- 修改结束 ---
   
   if (filtered.length > MAX_DISPLAY_RULES) {
     const more = document.createElement('div');
@@ -407,20 +427,25 @@ function initGfwModule() {
           const text = await res.text();
           const decoded = atob(text.replace(/\s/g, ''));
           // --- 修改开始 ---
+          // --- 修改后 (增强版代码) ---
           const domainSet = new Set(decoded.split(/\r?\n/)
-            .map(l => l.trim()) // 去除首尾空格
-            .filter(l => {
-              // 过滤空行、注释(!)、AutoProxy元数据([) 以及 白名单例外(@@)
-              return l && !l.startsWith('!') && !l.startsWith('[') && !l.startsWith('@@');
+            .map(l => l.trim())
+            // 1. 过滤掉空行、注释(!)、元数据([) 和 白名单规则(@@)
+            .filter(l => l && !l.startsWith('!') && !l.startsWith('[') && !l.startsWith('@'))
+            .map(l => {
+              // 2. 移除 AutoProxy 的各种前缀 (||, |, http://, https://)
+              return l.replace(/^\|\|/, '')
+                      .replace(/^\|/, '')
+                      .replace(/^https?:\/\//, '');
             })
             .map(l => {
-              // 提取域名逻辑：去掉 ||, http://, https://, 截取路径前部分
-              return l.replace(/^\|\|/, '')
-                      .replace(/^https?:\/\//, '')
-                      .split('/')[0]
-                      .split(':')[0]; // 同时也去掉可能存在的端口号
+              // 3. 提取纯域名：匹配开头是字母数字点横杠的部分，忽略后面的路径(/)或端口(:)
+              // 这一步能防止提取出非法字符
+              const match = l.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/); 
+              return match ? match[1] : null;
             })
-            .filter(d => d.includes('.')) // 确保看起来像域名
+            // 4. 最终过滤：必须包含点，且不能包含 * (我们只缓存精确域名或一级通配，太复杂的丢弃)
+            .filter(d => d && d.includes('.') && !d.includes('*'))
           );
           // --- 修改结束 ---
           const domains = Array.from(domainSet); 

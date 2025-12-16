@@ -1,4 +1,4 @@
-// js/popup.js - ProxySwitch v7.4.0
+// js/popup.js - ProxySwitch v7.4.1
 
 const els = {
   serverSelect: document.getElementById('serverSelect'),
@@ -212,12 +212,20 @@ function setMode(mode) {
   } else applySetting(config, mode);
 }
 
+// popup.js applySetting 函数
 function applySetting(c, m) { 
   chrome.proxy.settings.set({ value: c, scope: 'regular' }, () => { 
     currentMode = m; 
     updateModeUI(m); 
-    chrome.storage.local.get(null, checkDomainStatus);
+    
+    // 强制刷新一次配置缓存（虽然 storage listener 会触发，但手动触发更稳）
+    chrome.storage.local.get(null, (items) => {
+        checkDomainStatus(items);
+    });
+    
     chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
+    
+    // 新增：给个震动反馈或视觉反馈（可选）
   }); 
 }
 

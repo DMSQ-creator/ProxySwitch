@@ -1,4 +1,4 @@
-// js/background.js - ProxySwitch v7.4.0
+// js/background.js - ProxySwitch v7.4.1
 
 let cachedUserRules = new Set();
 let cachedUserWhitelist = new Set();
@@ -76,39 +76,39 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
 updateCacheAndApply();
 
 // --- 核心逻辑 ---
-
 function normalizeSet(list) {
   if (!list) return new Set();
   return new Set(list.map(d => {
     if (!d) return null;
-    let domain = d.toLowerCase().trim();
+    let raw = d.toLowerCase().trim();
+    let prefix = "";
 
-    // 1. 处理通配符逻辑 (*.)
-    if (domain.startsWith('*.')) {
-      // 如果去掉头部的 *. 后，剩余部分不包含 * (例如 *.百度.com -> 百度.com)
-      if (!domain.substring(2).includes('*')) {
-        domain = domain.substring(2);
-      }
-      // 否则保留完整的通配符 (例如 *.google.*)
-    } else if (domain.startsWith('.')) {
-      domain = domain.substring(1);
+    // --- 修复逻辑第一步：切头 ---
+    // 先把通配符 (*.) 拿掉，保存到 prefix 变量里
+    if (raw.startsWith('*.')) {
+      prefix = "*.";
+      raw = raw.substring(2); // 去掉前两个字符
+    } else if (raw.startsWith('.')) {
+      prefix = ".";
+      raw = raw.substring(1); // 去掉前一个字符
     }
 
-    // 2. [关键修复] 中文域名转 Punycode (防止 "supports only ASCII" 报错)
-    // 检测是否包含非 ASCII 字符 (比如中文)
-    if (/[^\x00-\x7F]/.test(domain)) {
+    // --- 修复逻辑第二步：转码 ---
+    // 现在 raw 里面是很干净的 "公司.com"，没有星号，可以放心转码
+    if (/[^\x00-\x7F]/.test(raw)) {
       try {
-        // 利用浏览器原生 URL 解析器自动转码 Punycode
-        // 注意：URL 构造器不支持带 * 的域名，如果含 * 且含中文，这里会报错并跳过
-        // 这是一个权衡：为了不崩，丢弃不支持的复杂中文通配符
-        domain = new URL('http://' + domain).hostname;
+        // 如果还包含 * (比如 google.*.com)，这种太复杂就不转了，防止报错
+        if (!raw.includes('*')) {
+           raw = new URL('http://' + raw).hostname;
+        }
       } catch (e) {
-        console.warn(`忽略无效的非ASCII规则: ${domain}`, e);
-        return null; // 丢弃这条规则，防止整个插件崩溃
+        return null; // 转码失败则丢弃
       }
     }
 
-    return domain;
+    // --- 修复逻辑第三步：接回去 ---
+    // 拼成 "*.xn--..."
+    return prefix + raw;
   }).filter(Boolean));
 }
 
@@ -136,66 +136,72 @@ function applyProxySettings(items) {
     return;
   }
 
-  // --- 1. 数据清洗 ---
+  // 1. 数据清洗与格式化 (Punycode 处理)
   let host = (activeServer.host || "127.0.0.1").trim();
-  
-  // [新增] 确保服务器地址也是 ASCII (处理中文域名服务器)
   if (/[^\x00-\x7F]/.test(host)) {
-    try {
-       host = new URL('http://' + host).hostname;
-    } catch(e) {
-       console.warn("Invalid Server Host:", host);
-       host = "127.0.0.1"; // 出错回退
-    }
+    try { host = new URL('http://' + host).hostname; } catch(e) { host = "127.0.0.1"; }
   }
 
   let port = parseInt(activeServer.port, 10);
-  if (isNaN(port) || port < 1 || port > 65535) {
-    port = 1080; 
-  }
+  if (isNaN(port) || port < 1 || port > 65535) port = 1080; 
+  
   const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
+  
+  // --- 关键修改：协议映射逻辑 ---
+  // PAC 脚本中的关键字映射
+  let pacProxyType = "SOCKS5"; 
+  if (scheme === 'HTTP') pacProxyType = "PROXY";
+  else if (scheme === 'HTTPS') pacProxyType = "HTTPS"; // Chrome 支持在 PAC 中返回 HTTPS
+  else if (scheme === 'SOCKS4') pacProxyType = "SOCKS"; // 标准 PAC 中 SOCKS 通常指 v4
+  else if (scheme === 'SOCKS5') pacProxyType = "SOCKS5";
+  
+  // 构造 PAC 返回字符串，增加 DIRECT 回退以防代理挂掉导致断网
+  const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
+
   // --------------------------------
 
-  const proxyType = (scheme === 'HTTP') ? "PROXY" : "SOCKS5";
-  const proxyStr = `${proxyType} ${host}:${port}; SOCKS ${host}:${port}; DIRECT`;
-
-  // --- 2. 规则分流 ---
   const rawUserRules = Array.from(cachedUserRules || []);
   const wildcardRules = rawUserRules.filter(r => r.includes('*'));
   const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
   const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
 
-// --- 3. 生成 PAC 脚本 ---
-  // ⚠️ 注意：下面的 pacScriptStr 字符串内部绝对不能出现中文，包括注释！
+  // --- PAC 脚本生成 (纯 ASCII) ---
   const pacScriptStr = `
     var Proxy = "${proxyStr}";
     var Direct = "DIRECT";
     
-    // Hash Map for O(1) lookup
     var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
-    
-    // Whitelist Map
     var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
-    
-    // Wildcard Array
     var wList = ${JSON.stringify(wildcardRules)};
 
+    // Regex for IPv4
+    var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
+
     function FindProxyForURL(url, host) {
-      if (isPlainHostName(host) || shExpMatch(host, "*.local") || isInNet(host, "10.0.0.0", "255.0.0.0") || isInNet(host, "172.16.0.0", "255.240.0.0") || isInNet(host, "192.168.0.0", "255.255.0.0") || isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
+      // Localhost optimization
+      if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
+      
+      // DNS Blocking Fix: Only check IPs
+      if (ipRegex.test(host)) {
+        if (isInNet(host, "10.0.0.0", "255.0.0.0") || 
+            isInNet(host, "172.16.0.0", "255.240.0.0") || 
+            isInNet(host, "192.168.0.0", "255.255.0.0") || 
+            isInNet(host, "127.0.0.0", "255.0.0.0")) {
+          return Direct;
+        }
+      }
       
       host = host.toLowerCase();
 
-      // 1. Check Whitelist
+      // Check Whitelist
       if (check(host, dMap)) return Direct;
 
-      
+      // Check Wildcards
       for (var i = 0; i < wList.length; i++) {
-        // Logic: Match "host" OR Match ".host"
-        // This allows "*.google.*" to match both "www.google.us" AND "google.us"
         if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
       }
 
-      // 3. Check HashMap
+      // Check Hash Map
       if (check(host, pMap)) return Proxy;
 
       return Direct;
@@ -212,14 +218,30 @@ function applyProxySettings(items) {
     }
   `;
 
-  // 保存并应用
+  // 应用设置
   chrome.storage.local.set({ pacScriptData: pacScriptStr });
   chrome.proxy.settings.get({}, (d) => {
+    if (chrome.runtime.lastError) console.warn(chrome.runtime.lastError);
+
     const mode = (d && d.value) ? d.value.mode : 'direct';
     if (mode === 'pac_script') {
       chrome.proxy.settings.set({ value: { mode: "pac_script", pacScript: { data: pacScriptStr } }, scope: 'regular' });
     } else if (mode === 'fixed_servers') {
-      chrome.proxy.settings.set({ value: { mode: "fixed_servers", rules: { singleProxy: { scheme: scheme.toLowerCase(), host, port } } }, scope: 'regular' });
+      // fixed_servers 模式下，Chrome API 需要小写的 scheme (http, https, socks4, socks5)
+      // 我们的 scheme 变量是全大写的，所以需要 toLowerCase()
+      chrome.proxy.settings.set({ 
+        value: { 
+          mode: "fixed_servers", 
+          rules: { 
+            singleProxy: { 
+              scheme: scheme.toLowerCase(), 
+              host, 
+              port 
+            } 
+          } 
+        }, 
+        scope: 'regular' 
+      });
     }
   });
 }
@@ -382,7 +404,7 @@ function calculateState(h, m){
   if(m === 'direct') return {c:"#2196F3", t:"D"};
   if(m === 'pac_script'){
     if (!h) return {c:"#9E9E9E", t:"A"};
-    const cleanH = h.replace(/^www\./, '');
+    const cleanH = h;
     if(checkSet(cleanH, cachedUserWhitelist)) return {c:"#2196F3", t:"W"};
     if(checkSet(cleanH, cachedTempRules)) return {c:"#FF9800", t:"T"};
     if(checkSet(cleanH, cachedUserRules) || checkSet(cleanH, cachedGfwDomains)) return {c:"#4CAF50", t:"A"};
@@ -393,10 +415,19 @@ function calculateState(h, m){
 
 function checkSet(h, s) { 
   if (!s || s.size === 0) return false; 
-  if (s.has(h)) return true; 
+  
+  // 辅助函数：尝试匹配当前域名的各种变体
+  const tryMatch = (domain) => {
+     if (s.has(domain)) return true;
+     if (s.has('.' + domain)) return true; 
+     if (s.has('*.' + domain)) return true;
+     return false;
+  };
+
+  if (tryMatch(h)) return true;
   var p = h.indexOf('.'); 
   while (p !== -1) { 
-    if (s.has(h.substring(p + 1))) return true; 
+    if (tryMatch(h.substring(p + 1))) return true; 
     p = h.indexOf('.', p + 1); 
   } 
   return false; 
