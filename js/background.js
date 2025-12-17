@@ -1,4 +1,4 @@
-// js/background.js - ProxySwitch v7.4.1
+// js/background.js
 
 let cachedUserRules = new Set();
 let cachedUserWhitelist = new Set();
@@ -147,15 +147,12 @@ function applyProxySettings(items) {
   
   const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
   
-  // --- 关键修改：协议映射逻辑 ---
-  // PAC 脚本中的关键字映射
+// --- 修复开始 ---
   let pacProxyType = "SOCKS5"; 
-  if (scheme === 'HTTP') pacProxyType = "PROXY";
-  else if (scheme === 'HTTPS') pacProxyType = "HTTPS"; // Chrome 支持在 PAC 中返回 HTTPS
-  else if (scheme === 'SOCKS4') pacProxyType = "SOCKS"; // 标准 PAC 中 SOCKS 通常指 v4
-  else if (scheme === 'SOCKS5') pacProxyType = "SOCKS5";
   
-  // 构造 PAC 返回字符串，增加 DIRECT 回退以防代理挂掉导致断网
+  if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";  
+  else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
+  else if (scheme === 'SOCKS5') pacProxyType = "SOCKS5";   
   const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
 
   // --------------------------------

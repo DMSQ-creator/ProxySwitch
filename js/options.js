@@ -1,7 +1,7 @@
-// js/options.js - ProxySwitch v7.4.1
+// js/options.js - ProxySwitch
 
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
-// [修改] 更改为 Google 官方连通性测试地址，HTTP 协议避免部分证书问题，返回 204 无内容
+// 保持 HTTP 以避免证书问题，用于测试代理连通性
 const LATENCY_TEST_URL = 'http://www.gstatic.com/generate_204';
 const MAX_DISPLAY_RULES = 500;
 
@@ -73,7 +73,6 @@ function initServerModule() {
   $('#saveServerItemBtn').onclick = saveServer;
   
   $('#testLatencyBtn').onclick = async () => {
-    // 新增：检查当前是否正在使用代理
     const config = await new Promise(r => chrome.proxy.settings.get({}, r));
     const mode = config.value.mode;
     
@@ -89,12 +88,9 @@ function initServerModule() {
 
     const start = Date.now();
     const controller = new AbortController();
-    // [修改] 设置 5 秒超时，避免挂起太久
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
-      // [修改] 增加 t=Date.now() 参数防止浏览器缓存请求结果
-      // [修改] mode: 'no-cors' 是必须的，因为我们只需要知道"通不通"，不需要读取内容
       await fetch(`${LATENCY_TEST_URL}?t=${Date.now()}`, { 
         mode: 'no-cors', 
         cache: 'no-store', 
@@ -104,13 +100,12 @@ function initServerModule() {
       clearTimeout(timeoutId);
       const ms = Date.now() - start;
       
-      let color = 'var(--success)'; // 绿色
-      if (ms > 500) color = 'var(--warning)'; // 黄色
-      if (ms > 1500) color = 'var(--danger)'; // 红色
+      let color = 'var(--success)'; 
+      if (ms > 500) color = 'var(--warning)';
+      if (ms > 1500) color = 'var(--danger)';
       
       resEl.innerHTML = `<span style="color:${color}; font-weight:bold;">✅ 连接成功 - 延迟: ${ms} ms</span>`;
     } catch (error) {
-      // 捕获超时(AbortError)或网络错误(TypeError)
       const isTimeout = error.name === 'AbortError';
       const errorMsg = isTimeout ? "连接超时 (>5000ms)" : "连接失败 (请检查代理配置)";
       resEl.innerHTML = `<span style="color:var(--danger); font-weight:bold;">❌ ${errorMsg}</span>`;
@@ -191,12 +186,11 @@ function saveServer() {
   let host = $('#editHost').value.trim().replace(/^https?:\/\//, '').replace(/^socks5?:\/\//, '');
 
   const portInput = $('#editPort').value.trim();
-  let port = parseInt(portInput, 10); // 使用 10 进制解析
+  let port = parseInt(portInput, 10);
 
-  // 检查是否为 NaN，或者超出 TCP 端口范围
   if (isNaN(port) || port < 1 || port > 65535) {
     alert("❌ 端口必须是 1 到 65535 之间的整数");
-    return; // 阻止保存
+    return;
   }
 
   const scheme = $('#editScheme').value;
@@ -277,19 +271,18 @@ function checkConflict(domain) {
   return null;
 }
 
-  function renderRuleList() {
-    const list = allData[currentRuleType] || [];
-    const keyword = $('#ruleSearch').value.trim().toLowerCase();
-    const filtered = list.filter(d => d.includes(keyword)).reverse();
-    $('#currentRuleCount').textContent = list.length;
-    
-    const container = $('#ruleListContainer');
-    container.innerHTML = '';
-    
-    const displayList = filtered.slice(0, MAX_DISPLAY_RULES);
-    const fragment = document.createDocumentFragment();
+function renderRuleList() {
+  const list = allData[currentRuleType] || [];
+  const keyword = $('#ruleSearch').value.trim().toLowerCase();
+  const filtered = list.filter(d => d.includes(keyword)).reverse();
+  $('#currentRuleCount').textContent = list.length;
+  
+  const container = $('#ruleListContainer');
+  container.innerHTML = '';
+  
+  const displayList = filtered.slice(0, MAX_DISPLAY_RULES);
+  const fragment = document.createDocumentFragment();
 
-  // 遍历每一条域名规则
   displayList.forEach(domain => {
       const div = document.createElement('div');
       div.className = 'rule-item';      
@@ -309,13 +302,11 @@ function checkConflict(domain) {
       div.onmouseleave = () => actionDiv.querySelector('.edit-hint').style.opacity = '0';      
       div.ondblclick = () => enableRuleEdit(div, domain);      
       actionDiv.querySelector('.btn-del').onclick = (e) => { 
-        e.stopPropagation(); // 防止触发双击事件
+        e.stopPropagation(); 
         deleteRule(domain); 
       };
       fragment.appendChild(div);
   });
-
-  // --- 修改结束 ---
   
   if (filtered.length > MAX_DISPLAY_RULES) {
     const more = document.createElement('div');
@@ -335,10 +326,9 @@ function enableRuleEdit(div, oldDomain) {
   input.type = 'text'; input.value = oldDomain; input.style.width = '300px'; input.style.fontFamily = 'monospace';
   span.replaceWith(input); input.focus();
   
-const save = () => {
+  const save = () => {
     let rawInput = input.value.trim().toLowerCase();
     
-    // [修改] 增加清洗逻辑
     let newDomain = rawInput;
     try {
       const urlObj = new URL(rawInput.includes('://') ? rawInput : 'http://' + rawInput);
@@ -375,11 +365,9 @@ function addRuleFromInput() {
   let val = rawVal;
   try {
     const urlObj = new URL(rawVal.includes('://') ? rawVal : 'http://' + rawVal);
-    // [修改] 增加 decodeURIComponent，把 %2A 变回 *
     val = decodeURIComponent(urlObj.hostname);
   } catch (e) {}
 
-  // 清理首尾多余的点
   val = val.replace(/^\.+|\.+$/g, ''); 
 
   const type = currentRuleType;
@@ -405,7 +393,7 @@ function deleteRule(domain) {
   chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); });
 }
 
-// --- GFW ---
+// --- GFW 模块 (重点修复) ---
 function initGfwModule() {
   $('#gfwSourceSelect').onchange = (e) => {
     const val = e.target.value;
@@ -416,45 +404,65 @@ function initGfwModule() {
   if (Array.from($('#gfwSourceSelect').options).some(o=>o.value===savedUrl)) $('#gfwSourceSelect').value = savedUrl;
   else { $('#gfwSourceSelect').value = 'custom'; $('#gfwUrlInput').style.display = 'block'; $('#gfwUrlInput').value = savedUrl; }
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
+  
   $('#updateGfwBtn').onclick = async () => {
     let url = $('#gfwSourceSelect').value;
     if (url === 'custom') url = $('#gfwUrlInput').value.trim();
     if (!url) return alert("请输入 URL");
-    $('#updateGfwBtn').textContent = "⏳..."; $('#updateGfwBtn').disabled = true;
+    
+    $('#updateGfwBtn').textContent = "⏳ 下载并解析中..."; 
+    $('#updateGfwBtn').disabled = true;
+
     try {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error("下载失败");
-          const text = await res.text();
-          const decoded = atob(text.replace(/\s/g, ''));
-          // --- 修改开始 ---
-          // --- 修改后 (增强版代码) ---
-          const domainSet = new Set(decoded.split(/\r?\n/)
-            .map(l => l.trim())
-            // 1. 过滤掉空行、注释(!)、元数据([) 和 白名单规则(@@)
-            .filter(l => l && !l.startsWith('!') && !l.startsWith('[') && !l.startsWith('@'))
-            .map(l => {
-              // 2. 移除 AutoProxy 的各种前缀 (||, |, http://, https://)
-              return l.replace(/^\|\|/, '')
-                      .replace(/^\|/, '')
-                      .replace(/^https?:\/\//, '');
-            })
-            .map(l => {
-              // 3. 提取纯域名：匹配开头是字母数字点横杠的部分，忽略后面的路径(/)或端口(:)
-              // 这一步能防止提取出非法字符
-              const match = l.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/); 
-              return match ? match[1] : null;
-            })
-            // 4. 最终过滤：必须包含点，且不能包含 * (我们只缓存精确域名或一级通配，太复杂的丢弃)
-            .filter(d => d && d.includes('.') && !d.includes('*'))
-          );
-          // --- 修改结束 ---
-          const domains = Array.from(domainSet); 
-          const now = new Date().toLocaleString();
-          chrome.storage.local.set({ gfwDomains: domains, ruleCount: domains.length, lastUpdate: now, gfwlistUrl: url }, async () => {
-            await loadAllData(); updateGfwStatus(domains.length, now); showToast("GFWList 更新成功");
-            $('#updateGfwBtn').textContent = "🔄 立即更新"; $('#updateGfwBtn').disabled = false;
-          });
-    } catch(e) { alert("更新失败: " + e.message); $('#updateGfwBtn').textContent = "❌ 失败"; $('#updateGfwBtn').disabled = false; }
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("下载失败");
+      const text = await res.text();
+      const decoded = atob(text.replace(/\s/g, ''));
+      
+      const domainSet = new Set(decoded.split(/\r?\n/)
+        .map(l => l.trim())
+        // 1. 过滤无效行
+        .filter(l => l && !l.startsWith('!') && !l.startsWith('[') && !l.startsWith('@'))
+        .map(l => {
+          // 2. 移除 AutoProxy 前缀
+          // 必须先移除前缀，否则后续正则可能匹配错误
+          let clean = l.replace(/^\|\|/, '')
+                       .replace(/^\|/, '')
+                       .replace(/^https?:\/\//, '');
+          
+          // [关键修复] 移除域名前可能残留的点（例如 ||.google.com -> .google.com -> google.com）
+          // 这一步确保了存入 PAC 映射表的 Key 是纯净的
+          return clean.replace(/^\.+/, '');
+        })
+        .map(l => {
+          // 3. 提取纯域名
+          const match = l.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/); 
+          return match ? match[1] : null;
+        })
+        // 4. 最终过滤
+        .filter(d => d && d.includes('.') && !d.includes('*'))
+      );
+      
+      const domains = Array.from(domainSet); 
+      const now = new Date().toLocaleString();
+      
+      // 保存并刷新
+      chrome.storage.local.set({ gfwDomains: domains, ruleCount: domains.length, lastUpdate: now, gfwlistUrl: url }, async () => {
+        await loadAllData(); 
+        updateGfwStatus(domains.length, now); 
+        showToast(`GFWList 更新成功: ${domains.length} 条规则`);
+        $('#updateGfwBtn').textContent = "🔄 立即更新"; 
+        $('#updateGfwBtn').disabled = false;
+        
+        // 触发一次代理刷新，确保新规则生效
+        chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+      });
+      
+    } catch(e) { 
+      alert("更新失败: " + e.message); 
+      $('#updateGfwBtn').textContent = "❌ 更新失败"; 
+      $('#updateGfwBtn').disabled = false; 
+    }
   };
 }
 function updateGfwStatus(c, t) { $('#gfwStatus').textContent = c ? `✅ 已缓存 ${c} 条 (更新于 ${t})` : "⚠️ 未加载"; }

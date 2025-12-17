@@ -1,4 +1,4 @@
-// js/popup.js - ProxySwitch v7.4.1
+// js/popup.js - ProxySwitch
 
 const els = {
   serverSelect: document.getElementById('serverSelect'),
