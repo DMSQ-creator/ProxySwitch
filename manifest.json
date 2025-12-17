@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ProxySwitch",
   "description": "Professional Proxy Manager. 专业的代理切换与规则管理工具。",
-  "version": "7.4.1",
+  "version": "7.5.0",
   "permissions": [
     "proxy", "storage", "tabs", "alarms", "webNavigation"
   ],
@@ -25,4 +25,5 @@
     "48": "assets/icon.png",
     "128": "assets/icon.png"
   }
+
 }
