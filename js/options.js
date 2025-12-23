@@ -14,6 +14,10 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 document.addEventListener('DOMContentLoaded', async () => {
+  const manifest = chrome.runtime.getManifest();
+  const versionEl = document.getElementById('appVersion');
+  if (versionEl) versionEl.textContent = `Version ${manifest.version}`;
+  
   await loadAllData();
   applyTheme(allData.theme || 'system');
   
@@ -35,13 +39,25 @@ async function loadAllData() {
     });
   });
 }
-
 function renderAll() {
   renderServerList();
   if (currentSection === 'rules') renderRuleList();
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
   if (allData.lastSyncTime) updateSyncUI(allData.lastSyncTime);
+  const savedUrl = allData.gfwlistUrl || DEFAULT_GFWLIST_URL;
+  const gfwSelect = $('#gfwSourceSelect');
+  const gfwInput = $('#gfwUrlInput');
+  const isPreset = Array.from(gfwSelect.options).some(o => o.value === savedUrl);
+  if (isPreset) {
+    gfwSelect.value = savedUrl;
+    gfwInput.style.display = 'none';
+  } else {
+    gfwSelect.value = 'custom';
+    gfwInput.style.display = 'block';
+    gfwInput.value = savedUrl;
+  }
   
+  // 5. 刷新同步设置相关的输入框
   $('#gitToken').value = allData.gitToken || '';
   $('#davUrl').value = allData.davUrl || '';
   $('#davUser').value = allData.davUser || '';
@@ -49,6 +65,8 @@ function renderAll() {
   
   $('#syncProvider').value = allData.syncProvider || 'github';
   $('#autoSync').checked = allData.autoSync || false;
+  
+  // 6. 切换同步面板显示
   switchSyncPanel();
 }
 
@@ -397,9 +415,22 @@ function deleteRule(domain) {
 function initGfwModule() {
   $('#gfwSourceSelect').onchange = (e) => {
     const val = e.target.value;
-    if (val === 'custom') $('#gfwUrlInput').style.display = 'block';
-    else { $('#gfwUrlInput').style.display = 'none'; chrome.storage.local.set({ gfwlistUrl: val }); }
+    if (val === 'custom') {
+      $('#gfwUrlInput').style.display = 'block';
+      const currentInput = $('#gfwUrlInput').value.trim();
+      if (currentInput) {
+        chrome.storage.local.set({ gfwlistUrl: currentInput });
+      }
+    } else { 
+      $('#gfwUrlInput').style.display = 'none'; 
+      chrome.storage.local.set({ gfwlistUrl: val }); 
+    }
   };
+  // 2. 【新增修复】监听自定义输入框的输入，实时保存
+  $('#gfwUrlInput').addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    chrome.storage.local.set({ gfwlistUrl: val });
+  });
   const savedUrl = allData.gfwlistUrl || DEFAULT_GFWLIST_URL;
   if (Array.from($('#gfwSourceSelect').options).some(o=>o.value===savedUrl)) $('#gfwSourceSelect').value = savedUrl;
   else { $('#gfwSourceSelect').value = 'custom'; $('#gfwUrlInput').style.display = 'block'; $('#gfwUrlInput').value = savedUrl; }
