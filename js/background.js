@@ -7,6 +7,11 @@ let cachedTempRules = new Set();
 let isSyncing = false;
 let uploadDebounceTimer = null;
 
+// 图标数据缓存 (Key: StateString -> Value: ImageData)
+let iconDataCache = {};
+// 当前代理模式
+let currentProxyMode = 'direct';
+
 const CONFIG_FILE_NAME = 'proxyswitch_config.json';
 const DAV_DIR_NAME = 'ProxySwitch';
 
@@ -16,7 +21,7 @@ const initPromise = new Promise((resolve) => {
   initReadyResolver = resolve;
 });
 
-// --- 工具函数：防抖 ---
+// --- 工具函数 ---
 function debounce(func, wait) {
   let timeout;
   return function(...args) {
@@ -26,7 +31,6 @@ function debounce(func, wait) {
 }
 
 // --- 初始化与监听 ---
-
 chrome.runtime.onInstalled.addListener(async (d) => {
   if (d.reason === 'install') {
     const items = await chrome.storage.local.get(['serverList']);
@@ -36,6 +40,8 @@ chrome.runtime.onInstalled.addListener(async (d) => {
     }
     chrome.runtime.openOptionsPage();
   }
+  // 初始化预渲染图标
+  await preloadAllIcons();
   updateCacheAndApply();
 });
 
@@ -46,6 +52,8 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     if (changes.userRules || changes.userWhitelist || changes.gfwDomains || 
         changes.serverList || changes.activeServerId || changes.tempRules) {
       debouncedUpdate();
+      chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
+      
       if (!isSyncing && (changes.userRules || changes.userWhitelist || changes.serverList)) {
         chrome.storage.local.get(['autoSync'], (s) => { 
           if (s.autoSync) triggerAutoUpload(); 
@@ -73,7 +81,8 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
   }
 });
 
-updateCacheAndApply();
+// 启动时先预渲染
+preloadAllIcons().then(updateCacheAndApply);
 
 // --- 核心逻辑 ---
 function normalizeSet(list) {
@@ -82,32 +91,11 @@ function normalizeSet(list) {
     if (!d) return null;
     let raw = d.toLowerCase().trim();
     let prefix = "";
-
-    // --- 修复逻辑第一步：切头 ---
-    // 先把通配符 (*.) 拿掉，保存到 prefix 变量里
-    if (raw.startsWith('*.')) {
-      prefix = "*.";
-      raw = raw.substring(2); // 去掉前两个字符
-    } else if (raw.startsWith('.')) {
-      prefix = ".";
-      raw = raw.substring(1); // 去掉前一个字符
-    }
-
-    // --- 修复逻辑第二步：转码 ---
-    // 现在 raw 里面是很干净的 "公司.com"，没有星号，可以放心转码
+    if (raw.startsWith('*.')) { prefix = "*."; raw = raw.substring(2); } 
+    else if (raw.startsWith('.')) { prefix = "."; raw = raw.substring(1); }
     if (/[^\x00-\x7F]/.test(raw)) {
-      try {
-        // 如果还包含 * (比如 google.*.com)，这种太复杂就不转了，防止报错
-        if (!raw.includes('*')) {
-           raw = new URL('http://' + raw).hostname;
-        }
-      } catch (e) {
-        return null; // 转码失败则丢弃
-      }
+      try { if (!raw.includes('*')) raw = new URL('http://' + raw).hostname; } catch (e) { return null; }
     }
-
-    // --- 修复逻辑第三步：接回去 ---
-    // 拼成 "*.xn--..."
     return prefix + raw;
   }).filter(Boolean));
 }
@@ -133,52 +121,39 @@ function applyProxySettings(items) {
   
   if (!activeServer) {
     chrome.proxy.settings.set({ value: { mode: "direct" }, scope: 'regular' });
+    setGlobalIcon('direct');
     return;
   }
 
-  // 1. 数据清洗与格式化 (Punycode 处理)
   let host = (activeServer.host || "127.0.0.1").trim();
   if (/[^\x00-\x7F]/.test(host)) {
     try { host = new URL('http://' + host).hostname; } catch(e) { host = "127.0.0.1"; }
   }
-
   let port = parseInt(activeServer.port, 10);
   if (isNaN(port) || port < 1 || port > 65535) port = 1080; 
-  
   const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
   
-// --- 修复开始 ---
   let pacProxyType = "SOCKS5"; 
-  
   if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";  
   else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
   else if (scheme === 'SOCKS5') pacProxyType = "SOCKS5";   
   const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
-
-  // --------------------------------
 
   const rawUserRules = Array.from(cachedUserRules || []);
   const wildcardRules = rawUserRules.filter(r => r.includes('*'));
   const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
   const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
 
-  // --- PAC 脚本生成 (纯 ASCII) ---
   const pacScriptStr = `
     var Proxy = "${proxyStr}";
     var Direct = "DIRECT";
-    
     var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
     var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
     var wList = ${JSON.stringify(wildcardRules)};
-
-    // Regex for IPv4
     var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
 
     function FindProxyForURL(url, host) {
-      // Localhost optimization
       if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
-      
-      // DNS Blocking Fix: Only check IPs
       if (ipRegex.test(host)) {
         if (isInNet(host, "10.0.0.0", "255.0.0.0") || 
             isInNet(host, "172.16.0.0", "255.240.0.0") || 
@@ -187,20 +162,12 @@ function applyProxySettings(items) {
           return Direct;
         }
       }
-      
       host = host.toLowerCase();
-
-      // Check Whitelist
       if (check(host, dMap)) return Direct;
-
-      // Check Wildcards
       for (var i = 0; i < wList.length; i++) {
         if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
       }
-
-      // Check Hash Map
       if (check(host, pMap)) return Proxy;
-
       return Direct;
     }
 
@@ -215,36 +182,24 @@ function applyProxySettings(items) {
     }
   `;
 
-  // 应用设置
   chrome.storage.local.set({ pacScriptData: pacScriptStr });
   chrome.proxy.settings.get({}, (d) => {
     if (chrome.runtime.lastError) console.warn(chrome.runtime.lastError);
-
     const mode = (d && d.value) ? d.value.mode : 'direct';
+    
+    // 更新全局变量和图标状态
+    currentProxyMode = mode;
+    handleGlobalIconUpdate(mode);
+
     if (mode === 'pac_script') {
       chrome.proxy.settings.set({ value: { mode: "pac_script", pacScript: { data: pacScriptStr } }, scope: 'regular' });
     } else if (mode === 'fixed_servers') {
-      // fixed_servers 模式下，Chrome API 需要小写的 scheme (http, https, socks4, socks5)
-      // 我们的 scheme 变量是全大写的，所以需要 toLowerCase()
-      chrome.proxy.settings.set({ 
-        value: { 
-          mode: "fixed_servers", 
-          rules: { 
-            singleProxy: { 
-              scheme: scheme.toLowerCase(), 
-              host, 
-              port 
-            } 
-          } 
-        }, 
-        scope: 'regular' 
-      });
+      chrome.proxy.settings.set({ value: { mode: "fixed_servers", rules: { singleProxy: { scheme: scheme.toLowerCase(), host, port } } }, scope: 'regular' });
     }
   });
 }
 
-// --- 同步模块 (Base64 编码) ---
-
+// --- 同步逻辑 (保持不变) ---
 async function bgWebdavUpload(i, d){
   const a = 'Basic ' + btoa(i.davUser + ':' + i.davPass);
   const r = i.davUrl.endsWith('/') ? i.davUrl : i.davUrl + '/';
@@ -256,7 +211,6 @@ async function bgWebdavUpload(i, d){
   });
   if(!res.ok) throw new Error("WebDAV Upload failed: " + res.status);
 }
-
 async function bgGithubDownload(t){
   const g = await ghFetch('https://api.github.com/gists', 'GET', t);
   const target = g.find(x => x.files && x.files[CONFIG_FILE_NAME]);
@@ -264,22 +218,15 @@ async function bgGithubDownload(t){
   const r = await fetch(target.files[CONFIG_FILE_NAME].raw_url + '?t=' + Date.now());
   return await r.json();
 }
-
 async function performCloudUpload(){
   isSyncing = true;
   try {
     const items = await chrome.storage.local.get(null);
     const { userRules, userWhitelist, serverList, activeServerId, gfwlistUrl, theme, autoSync, syncProvider } = items;
-    
-    // 原始 Payload
     const rawPayload = { userRules, userWhitelist, serverList, activeServerId, gfwlistUrl, theme, autoSync, syncProvider, timestamp: Date.now() };
-    
-    // 【Base64 编码混淆】 (支持 UTF-8)
     const jsonStr = JSON.stringify(rawPayload);
     const encodedStr = btoa(unescape(encodeURIComponent(jsonStr)));
-    
     const finalBody = { encoded: true, content: encodedStr };
-
     if (items.syncProvider === 'webdav') {
       if (!items.davUrl) throw new Error("WebDAV URL not set");
       await bgWebdavUpload(items, finalBody);
@@ -291,27 +238,19 @@ async function performCloudUpload(){
         const exist = gists.find(x => x.files && x.files[CONFIG_FILE_NAME]);
         if (exist) gistId = exist.id;
       } catch(e) {}
-
       const body = {
         description: "ProxySwitch Config Sync (Obfuscated)",
         public: false,
         files: { [CONFIG_FILE_NAME]: { content: JSON.stringify(finalBody) } }
       };
-
-      if (gistId) {
-        await ghFetch(`https://api.github.com/gists/${gistId}`, 'PATCH', items.gitToken, body);
-      } else {
-        await ghFetch('https://api.github.com/gists', 'POST', items.gitToken, body);
-      }
+      if (gistId) await ghFetch(`https://api.github.com/gists/${gistId}`, 'PATCH', items.gitToken, body);
+      else await ghFetch('https://api.github.com/gists', 'POST', items.gitToken, body);
     }
     const time = new Date().toLocaleString();
     await chrome.storage.local.set({ lastSyncTime: time });
     return time;
-  } finally {
-    isSyncing = false;
-  }
+  } finally { isSyncing = false; }
 }
-
 async function performCloudDownload(){
   isSyncing = true;
   try {
@@ -328,70 +267,138 @@ async function performCloudDownload(){
       if (!items.gitToken) throw new Error("GitHub Token not set");
       data = await bgGithubDownload(items.gitToken);
     }
-
-    // 【Base64 解码还原】
     if (data && data.encoded && data.content) {
-      try {
-        const jsonStr = decodeURIComponent(escape(atob(data.content)));
-        data = JSON.parse(jsonStr);
-      } catch(e) {
-        // 兼容旧版加密数据的容错处理 (如果解不开 Base64，说明可能是旧数据，直接抛弃或尝试读取)
-        // 这里简单处理，如果解析失败，抛出错误
-        throw new Error("配置文件格式不兼容，无法解析。");
-      }
+      try { const jsonStr = decodeURIComponent(escape(atob(data.content))); data = JSON.parse(jsonStr); } catch(e) { throw new Error("配置文件格式不兼容"); }
     }
-
     if (data) {
-      delete data.gitToken; delete data.davUrl; delete data.davUser; delete data.davPass;
-      delete data.gfwDomains; 
+      delete data.gitToken; delete data.davUrl; delete data.davUser; delete data.davPass; delete data.gfwDomains; 
       await chrome.storage.local.set(data);
       const time = new Date().toLocaleString();
       await chrome.storage.local.set({ lastSyncTime: time });
       return time;
     }
-  } finally {
-    isSyncing = false;
-  }
+  } finally { isSyncing = false; }
 }
-
 function triggerAutoUpload() {
   if (uploadDebounceTimer) clearTimeout(uploadDebounceTimer);
   uploadDebounceTimer = setTimeout(() => performCloudUpload().catch(console.error), 10000);
 }
-
 async function ghFetch(url, method, token, body) {
-  const opts = {
-    method,
-    headers: {
-      'Authorization': `token ${token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json'
-    }
-  };
+  const opts = { method, headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`GitHub API Error: ${res.status}`);
   return await res.json();
 }
 
-// js/background.js - 部分代码替换
+// --- 【重构】图标管理模块 ---
 
-// ... 前面的代码 (初始化、同步逻辑等) 保持不变 ...
+/**
+ * 预渲染所有可能的图标状态，存入 iconDataCache
+ */
+async function preloadAllIcons() {
+  const configs = [
+    { key: 'fixed',    c: "#8b5cf6", t: "G" }, // 全局紫
+    { key: 'direct',   c: "#0ea5e9", t: "D" }, // 直连蓝
+    { key: 'system',   c: "#64748b", t: "S" }, // 系统灰
+    { key: 'pac_gray', c: "#94a3b8", t: "A" }, // 自动灰 (直连)
+    { key: 'pac_green',c: "#10b981", t: "A" }, // 自动绿 (GFW)
+    { key: 'pac_blue', c: "#0ea5e9", t: "W" }, // 自动蓝 (白名单)
+    { key: 'pac_org',  c: "#f59e0b", t: "T" }, // 自动橙 (临时)
+    { key: 'pac_purp', c: "#8b5cf6", t: "M" }  // 自动紫 (黑名单)
+  ];
+  
+  for (const cfg of configs) {
+    iconDataCache[cfg.key] = createIconImageData(cfg.c, cfg.t);
+  }
+}
 
-// --- 图标绘制模块 (Icon Painter) ---
+function createIconImageData(color, text) {
+  const c = new OffscreenCanvas(32,32);
+  const ctx = c.getContext('2d');
+  const radius = 8; 
+  
+  ctx.clearRect(0, 0, 32, 32);
+  ctx.fillStyle = color; 
+  ctx.beginPath();
+  ctx.moveTo(radius, 0);
+  ctx.lineTo(32 - radius, 0);
+  ctx.quadraticCurveTo(32, 0, 32, radius);
+  ctx.lineTo(32, 32 - radius);
+  ctx.quadraticCurveTo(32, 32, 32 - radius, 32);
+  ctx.lineTo(radius, 32);
+  ctx.quadraticCurveTo(0, 32, 0, 32 - radius);
+  ctx.lineTo(0, radius);
+  ctx.quadraticCurveTo(0, 0, radius, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 16, 17);
+
+  return ctx.getImageData(0,0,32,32);
+}
+
+/**
+ * 设置全局图标 (无 tabId)，作为浏览器重置时的默认值
+ * 这就是 SwitchyOmega 不闪的核心原因
+ */
+function setGlobalIcon(key) {
+  if (iconDataCache[key]) {
+    chrome.action.setIcon({ imageData: iconDataCache[key] });
+  }
+}
+
+/**
+ * 根据代理模式更新全局图标
+ */
+function handleGlobalIconUpdate(mode) {
+  if (mode === 'pac_script') {
+    // 自动模式下，默认图标设为“灰色 A”
+    // 这样加载直连页面时，重置为灰色 A，计算结果也是灰色 A -> 视觉无变化
+    setGlobalIcon('pac_gray');
+  } else if (mode === 'fixed_servers') {
+    setGlobalIcon('fixed');
+  } else if (mode === 'direct') {
+    setGlobalIcon('direct');
+  } else if (mode === 'system') {
+    setGlobalIcon('system');
+  }
+}
 
 function getSafeHostname(urlStr) {
   if (!urlStr || !urlStr.startsWith('http')) return null;
   try { return new URL(urlStr).hostname.toLowerCase(); } catch (e) { return null; }
 }
 
-async function updateTabIcon(tabId, url) {
+function updateTabIcon(tabId, url) {
+  // 如果不是 PAC 模式，根本不需要单独画图标，全局图标已经处理好了
+  if (currentProxyMode !== 'pac_script') return;
+
   const hostname = getSafeHostname(url);
-  chrome.proxy.settings.get({}, d => {
-    const mode = (d && d.value) ? d.value.mode : 'direct';
-    const state = calculateState(hostname, mode);
-    drawIcon(state, tabId);
-  });
+  
+  // 智能计算 PAC 状态
+  let iconKey = 'pac_gray'; // 默认直连灰
+  let title = "自动分流 (直连)";
+
+  if (hostname) {
+    if (checkSet(hostname, cachedUserWhitelist)) { iconKey = 'pac_blue'; title = "强制直连"; }
+    else if (checkSet(hostname, cachedTempRules)) { iconKey = 'pac_org'; title = "临时规则"; }
+    else if (checkSet(hostname, cachedUserRules)) { iconKey = 'pac_purp'; title = "强制代理"; }
+    else if (checkSet(hostname, cachedGfwDomains)) { iconKey = 'pac_green'; title = "自动分流 (代理中)"; }
+  }
+
+  // 性能优化：直接设置 ImageData，不创建 Canvas
+  if (iconDataCache[iconKey]) {
+    // 如果算出来的就是默认的灰色A，其实可以不设置，因为全局就是灰色A。
+    // 但为了保险起见（比如之前是绿色，现在切回了灰色页面），还是设置一下。
+    // chrome.action.setIcon 对相同数据非常快。
+    chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabId });
+    chrome.action.setTitle({ title: `ProxySwitch: ${title}`, tabId: tabId });
+  }
 }
 
 function updateIconForActiveTab(){
@@ -402,37 +409,6 @@ function updateIconForActiveTab(){
   });
 }
 
-function calculateState(h, m){
-  // 1. 全局模式 (Global/Fixed) -> 紫色 P (Proxy) 或 G (Global)
-  // 为了匹配 Popup 的紫色，这里用紫色
-  if(m === 'fixed_servers') return {c:"#8b5cf6", t:"G", title:"全局代理"}; 
-  
-  // 2. 直连模式 (Direct) -> 品牌蓝 D (Direct)
-  // 这个颜色 #0ea5e9 正好是你 Logo 的蓝色
-  if(m === 'direct') return {c:"#0ea5e9", t:"D", title:"直接连接"};
-  
-  // 3. 系统模式 (System) -> 灰色 S (System)
-  if(m === 'system') return {c:"#64748b", t:"S", title:"系统代理"};
-  
-  // 4. 自动模式 (PAC) -> 绿色
-  if(m === 'pac_script'){
-    if (!h) return {c:"#10b981", t:"A", title:"自动分流"}; // 默认绿色
-    
-    // 检查具体匹配情况
-    // 修正：这里需要引用全局的 cached 变量，确保它们已定义
-    if(checkSet(h, cachedUserWhitelist)) return {c:"#0ea5e9", t:"W", title:"强制直连"}; // 白名单->蓝色
-    if(checkSet(h, cachedTempRules)) return {c:"#f59e0b", t:"T", title:"临时规则"};     // 临时->橙色
-    if(checkSet(h, cachedUserRules)) return {c:"#8b5cf6", t:"M", title:"强制代理"};      // 手动黑名单->紫色
-    if(checkSet(h, cachedGfwDomains)) return {c:"#10b981", t:"A", title:"自动分流"};     // GFWList->绿色
-    
-    return {c:"#10b981", t:"A", title:"自动分流"}; // 默认绿色
-  }
-  
-  // 默认兜底
-  return {c:"#0ea5e9", t:"D", title:"直接连接"};
-}
-
-// 辅助函数：检查域名是否在集合中 (支持通配符)
 function checkSet(h, s) { 
   if (!s || s.size === 0) return false; 
   const tryMatch = (domain) => {
@@ -450,63 +426,22 @@ function checkSet(h, s) {
   return false; 
 }
 
-/**
- * 核心绘制函数：画出类似 Logo 的圆角矩形
- */
-function drawIcon(s, tabId){
-  // 32x32 是 Retina 屏幕的标准图标尺寸
-  const c = new OffscreenCanvas(32,32);
-  const ctx = c.getContext('2d');
-  
-  // 1. 清除画布
-  ctx.clearRect(0, 0, 32, 32);
+// --- 事件监听 ---
 
-  // 2. 绘制圆角矩形 (Squircle) - 模仿你的 Logo 形状
-  const radius = 8; // 圆角大小
-  ctx.fillStyle = s.c; // 背景色
-  
-  ctx.beginPath();
-  ctx.moveTo(radius, 0);
-  ctx.lineTo(32 - radius, 0);
-  ctx.quadraticCurveTo(32, 0, 32, radius);
-  ctx.lineTo(32, 32 - radius);
-  ctx.quadraticCurveTo(32, 32, 32 - radius, 32);
-  ctx.lineTo(radius, 32);
-  ctx.quadraticCurveTo(0, 32, 0, 32 - radius);
-  ctx.lineTo(0, radius);
-  ctx.quadraticCurveTo(0, 0, radius, 0);
-  ctx.closePath();
-  ctx.fill();
-
-  // 3. 绘制文字 (白色，加粗，居中)
-  ctx.fillStyle = "#ffffff";
-  // 使用更粗的字体，接近 Logo 的质感
-  ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  // 稍微向下一点点修正视觉中心 (y=17 而不是 16)
-  ctx.fillText(s.t, 16, 17);
-
-  // 4. 设置图标
-  const imageData = ctx.getImageData(0,0,32,32);
-  
-  chrome.action.setIcon({ imageData: imageData, tabId: tabId }, () => {
-    if (chrome.runtime.lastError) { /* 忽略标签页关闭错误 */ }
-  });
-  
-  // 5. (可选) 设置鼠标悬停时的提示文字
-   chrome.action.setTitle({ title: `ProxySwitch: ${s.title}`, tabId: tabId });
-}
-
-// 监听器保持不变
+// 优化：只在 PAC 模式下监听
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (tab.url) { await initPromise; updateTabIcon(tabId, tab.url); }
+  if (currentProxyMode === 'pac_script' && tab.url) { 
+    await initPromise; 
+    updateTabIcon(tabId, tab.url); 
+  }
 });
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  await initPromise;
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (chrome.runtime.lastError) return; 
-    if (tab && tab.url) updateTabIcon(tab.id, tab.url);
-  });
+  if (currentProxyMode === 'pac_script') {
+    await initPromise;
+    chrome.tabs.get(activeInfo.tabId, (tab) => {
+      if (chrome.runtime.lastError) return; 
+      if (tab && tab.url) updateTabIcon(tab.id, tab.url);
+    });
+  }
 });
