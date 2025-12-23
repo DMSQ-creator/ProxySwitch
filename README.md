@@ -1,7 +1,7 @@
 # ProxySwitch - Professional Proxy Manager
 # 专业的 Chrome 代理切换与规则管理工具
 
-![Version](https://img.shields.io/badge/version-7.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-7.6.1-blue.svg)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-green.svg)
 
 **ProxySwitch** 是一款基于 Chrome Manifest V3 架构开发的轻量级、高性能代理管理扩展。它支持自动分流（PAC）、全局代理和直连模式，并内置了强大的规则管理和云同步功能。
