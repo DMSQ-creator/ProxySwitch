@@ -374,6 +374,12 @@ async function ghFetch(url, method, token, body) {
   return await res.json();
 }
 
+// js/background.js - 部分代码替换
+
+// ... 前面的代码 (初始化、同步逻辑等) 保持不变 ...
+
+// --- 图标绘制模块 (Icon Painter) ---
+
 function getSafeHostname(urlStr) {
   if (!urlStr || !urlStr.startsWith('http')) return null;
   try { return new URL(urlStr).hostname.toLowerCase(); } catch (e) { return null; }
@@ -397,30 +403,44 @@ function updateIconForActiveTab(){
 }
 
 function calculateState(h, m){
-  if(m === 'fixed_servers') return {c:"#4CAF50", t:"P"};
-  if(m === 'direct') return {c:"#2196F3", t:"D"};
+  // 1. 全局模式 (Global/Fixed) -> 紫色 P (Proxy) 或 G (Global)
+  // 为了匹配 Popup 的紫色，这里用紫色
+  if(m === 'fixed_servers') return {c:"#8b5cf6", t:"G", title:"全局代理"}; 
+  
+  // 2. 直连模式 (Direct) -> 品牌蓝 D (Direct)
+  // 这个颜色 #0ea5e9 正好是你 Logo 的蓝色
+  if(m === 'direct') return {c:"#0ea5e9", t:"D", title:"直接连接"};
+  
+  // 3. 系统模式 (System) -> 灰色 S (System)
+  if(m === 'system') return {c:"#64748b", t:"S", title:"系统代理"};
+  
+  // 4. 自动模式 (PAC) -> 绿色
   if(m === 'pac_script'){
-    if (!h) return {c:"#9E9E9E", t:"A"};
-    const cleanH = h;
-    if(checkSet(cleanH, cachedUserWhitelist)) return {c:"#2196F3", t:"W"};
-    if(checkSet(cleanH, cachedTempRules)) return {c:"#FF9800", t:"T"};
-    if(checkSet(cleanH, cachedUserRules) || checkSet(cleanH, cachedGfwDomains)) return {c:"#4CAF50", t:"A"};
-    return {c:"#9E9E9E", t:"A"};
+    if (!h) return {c:"#10b981", t:"A", title:"自动分流"}; // 默认绿色
+    
+    // 检查具体匹配情况
+    // 修正：这里需要引用全局的 cached 变量，确保它们已定义
+    if(checkSet(h, cachedUserWhitelist)) return {c:"#0ea5e9", t:"W", title:"强制直连"}; // 白名单->蓝色
+    if(checkSet(h, cachedTempRules)) return {c:"#f59e0b", t:"T", title:"临时规则"};     // 临时->橙色
+    if(checkSet(h, cachedUserRules)) return {c:"#8b5cf6", t:"M", title:"强制代理"};      // 手动黑名单->紫色
+    if(checkSet(h, cachedGfwDomains)) return {c:"#10b981", t:"A", title:"自动分流"};     // GFWList->绿色
+    
+    return {c:"#10b981", t:"A", title:"自动分流"}; // 默认绿色
   }
-  return {c:"#9E9E9E", t:"D"};
+  
+  // 默认兜底
+  return {c:"#0ea5e9", t:"D", title:"直接连接"};
 }
 
+// 辅助函数：检查域名是否在集合中 (支持通配符)
 function checkSet(h, s) { 
   if (!s || s.size === 0) return false; 
-  
-  // 辅助函数：尝试匹配当前域名的各种变体
   const tryMatch = (domain) => {
      if (s.has(domain)) return true;
      if (s.has('.' + domain)) return true; 
      if (s.has('*.' + domain)) return true;
      return false;
   };
-
   if (tryMatch(h)) return true;
   var p = h.indexOf('.'); 
   while (p !== -1) { 
@@ -430,22 +450,55 @@ function checkSet(h, s) {
   return false; 
 }
 
+/**
+ * 核心绘制函数：画出类似 Logo 的圆角矩形
+ */
 function drawIcon(s, tabId){
+  // 32x32 是 Retina 屏幕的标准图标尺寸
   const c = new OffscreenCanvas(32,32);
-  const x = c.getContext('2d');
-  x.fillStyle = s.c; 
-  x.beginPath(); x.arc(16,16,16,0,Math.PI*2); x.fill();
-  x.fillStyle = "#fff"; x.font = "bold 20px sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(s.t, 16, 17);
-  const imageData = x.getImageData(0,0,32,32);
+  const ctx = c.getContext('2d');
+  
+  // 1. 清除画布
+  ctx.clearRect(0, 0, 32, 32);
 
-  // [修改] 增加回调函数并在里面访问 lastError，这样 Chrome 就认为错误已被处理，不会在控制台报错
+  // 2. 绘制圆角矩形 (Squircle) - 模仿你的 Logo 形状
+  const radius = 8; // 圆角大小
+  ctx.fillStyle = s.c; // 背景色
+  
+  ctx.beginPath();
+  ctx.moveTo(radius, 0);
+  ctx.lineTo(32 - radius, 0);
+  ctx.quadraticCurveTo(32, 0, 32, radius);
+  ctx.lineTo(32, 32 - radius);
+  ctx.quadraticCurveTo(32, 32, 32 - radius, 32);
+  ctx.lineTo(radius, 32);
+  ctx.quadraticCurveTo(0, 32, 0, 32 - radius);
+  ctx.lineTo(0, radius);
+  ctx.quadraticCurveTo(0, 0, radius, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // 3. 绘制文字 (白色，加粗，居中)
+  ctx.fillStyle = "#ffffff";
+  // 使用更粗的字体，接近 Logo 的质感
+  ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // 稍微向下一点点修正视觉中心 (y=17 而不是 16)
+  ctx.fillText(s.t, 16, 17);
+
+  // 4. 设置图标
+  const imageData = ctx.getImageData(0,0,32,32);
+  
   chrome.action.setIcon({ imageData: imageData, tabId: tabId }, () => {
-    if (chrome.runtime.lastError) {
-      // 标签页已关闭，忽略此错误
-    }
+    if (chrome.runtime.lastError) { /* 忽略标签页关闭错误 */ }
   });
+  
+  // 5. (可选) 设置鼠标悬停时的提示文字
+   chrome.action.setTitle({ title: `ProxySwitch: ${s.title}`, tabId: tabId });
 }
 
+// 监听器保持不变
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (tab.url) { await initPromise; updateTabIcon(tabId, tab.url); }
 });
@@ -453,7 +506,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   await initPromise;
   chrome.tabs.get(activeInfo.tabId, (tab) => {
-    // [修改] 如果获取过程中标签页被关闭，直接 return，防止报错
     if (chrome.runtime.lastError) return; 
     if (tab && tab.url) updateTabIcon(tab.id, tab.url);
   });

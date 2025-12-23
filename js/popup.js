@@ -1,17 +1,24 @@
-// js/popup.js - ProxySwitch
+// js/popup.js - ProxySwitch (Final Version)
 
 const els = {
   serverSelect: document.getElementById('serverSelect'),
+  
+  // 状态显示区域
   domain: document.getElementById('currentDomain'),
   status: document.getElementById('routingStatus'),
   statusIcon: document.getElementById('statusIcon'),
   domainArea: document.getElementById('domainArea'),
   
+  // 模式切换按钮
   modePac: document.getElementById('mode-pac'),
   modeFixed: document.getElementById('mode-fixed'),
   modeDirect: document.getElementById('mode-direct'),
+  modeSystem: document.getElementById('mode-system'),
   
+  // 操作按钮
+  addBtnGroup: document.getElementById('addBtnGroup'),
   addRuleBtn: document.getElementById('addRuleBtn'),
+  addTempRuleBtn: document.getElementById('addTempRuleBtn'),
   removeBtn: document.getElementById('removeBtn'),
   
   goOptions: document.getElementById('openSettings')
@@ -20,9 +27,11 @@ const els = {
 let currentTabDomain = '';
 let currentMode = 'direct';
 
+// 初始化
 loadBaseConfig();
 analyzeCurrentTab();
 
+// 监听配置变化
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
     loadBaseConfig(); 
@@ -32,12 +41,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 function loadBaseConfig() {
   chrome.storage.local.get(null, (items) => {
+    // 1. 应用主题
     const theme = items.theme || 'system';
     const doc = document.documentElement;
     if (theme === 'dark') doc.setAttribute('data-theme', 'dark');
     else if (theme === 'light') doc.setAttribute('data-theme', 'light');
     else doc.removeAttribute('data-theme');
 
+    // 2. 渲染服务器列表
     const servers = items.serverList || [];
     const activeId = items.activeServerId;
     
@@ -65,6 +76,7 @@ function loadBaseConfig() {
       els.serverSelect.value = activeId;
     }
 
+    // 3. 获取当前代理模式
     chrome.proxy.settings.get({}, (d) => {
       if (d && d.value) {
         currentMode = d.value.mode;
@@ -83,7 +95,7 @@ function analyzeCurrentTab() {
         const url = new URL(tab.url);
         currentTabDomain = url.hostname.toLowerCase();
         els.domain.textContent = currentTabDomain;
-        els.domainArea.style.display = 'block';
+        els.domainArea.style.display = 'flex'; // 确保显示
         checkDomainStatusWrapper();
       } catch (e) {
         showInvalidPageUI();
@@ -103,17 +115,22 @@ function checkDomainStatusWrapper() {
 
 function showInvalidPageUI() {
   els.domain.textContent = "当前页面无效";
-  els.domainArea.style.display = 'block';
+  els.domainArea.style.display = 'flex';
   els.status.textContent = "无法对此页面设置规则";
   els.statusIcon.textContent = "🚫";
   
-  const wrapper = document.querySelector('.domain-info');
-  wrapper.className = 'domain-info status-fail';
+  const wrapper = document.querySelector('.domain-card');
+  if (wrapper) {
+    wrapper.classList.remove('status-proxy', 'status-direct', 'status-user', 'status-temp');
+    wrapper.classList.add('status-fail');
+  }
   
-  els.addRuleBtn.style.display = 'none';
+  // 隐藏所有按钮
+  els.addBtnGroup.style.display = 'none';
   els.removeBtn.style.display = 'none';
 }
 
+// 核心状态判断逻辑
 function checkDomainStatus(items) {
   const userRules = items.userRules || [];
   const tempRules = items.tempRules || [];
@@ -122,9 +139,11 @@ function checkDomainStatus(items) {
   
   let text = "未匹配 (直连)";
   let icon = "🛡️";
-  let isProxy = false, isWhite = false;
-  let statusClass = "status-direct"; 
+  let isProxy = false;  // 用户规则命中
+  let isWhite = false;  // 白名单命中
+  let statusClass = "status-direct";
 
+  // 优先级判断：白名单 > 临时 > 用户黑名单 > GFWList
   if (checkList(whitelist, currentTabDomain)) { 
     text = "强制直连 (白名单)"; 
     icon = "🛡️";
@@ -132,40 +151,54 @@ function checkDomainStatus(items) {
     statusClass = "status-direct";
   } 
   else if (checkList(tempRules, currentTabDomain)) { 
-    text = "临时代理"; 
+    text = "临时代理 (本次)"; 
     icon = "⏱️";
     isProxy = true; 
-    statusClass = "status-proxy";
+    statusClass = "status-temp"; // 橙色
   }
   else if (checkList(userRules, currentTabDomain)) { 
     text = "强制代理 (黑名单)"; 
     icon = "🚀";
     isProxy = true; 
-    statusClass = "status-proxy";
+    statusClass = "status-user"; // 紫色
   }
   else if (checkList(gfwRules, currentTabDomain)) { 
     text = "匹配 GFWList (自动)"; 
     icon = "🌏";
-    statusClass = "status-proxy";
+    // GFWList 属于自动规则，不算作用户手动强制，所以 bottom button 依然显示 "加入"
+    statusClass = "status-proxy"; // 绿色
   } 
 
   els.status.textContent = text;
   els.statusIcon.textContent = icon;
 
-  const wrapper = document.querySelector('.domain-info');
+  const wrapper = document.querySelector('.domain-card');
   if (wrapper) {
-    wrapper.classList.remove('status-proxy', 'status-direct', 'status-fail');
+    // 彻底清除所有可能的类名
+    wrapper.classList.remove(
+        'status-proxy', 
+        'status-direct', 
+        'status-fail', 
+        'status-user', 
+        'status-temp'
+    );
     wrapper.classList.add(statusClass);
   }
   
+  // 底部按钮逻辑
   if (isProxy || isWhite) {
+    // 已在手动规则中 -> 显示移除
     els.removeBtn.style.display = 'flex'; 
-    els.addRuleBtn.style.display = 'none';
+    els.addBtnGroup.style.display = 'none';
     els.removeBtn.onclick = () => removeDomainRule();
   } else {
+    // 未在手动规则中 -> 显示添加组
     els.removeBtn.style.display = 'none'; 
-    els.addRuleBtn.style.display = 'flex';
+    els.addBtnGroup.style.display = 'flex';
+    
+    // 绑定事件
     els.addRuleBtn.onclick = () => addRule('userRules');
+    els.addTempRuleBtn.onclick = () => addRule('tempRules');
   }
 }
 
@@ -181,6 +214,7 @@ function checkList(list, domain) {
   return false;
 }
 
+// 事件绑定
 els.serverSelect.onchange = () => {
   const id = els.serverSelect.value;
   chrome.storage.local.set({ activeServerId: id }, () => {
@@ -188,9 +222,11 @@ els.serverSelect.onchange = () => {
   });
 };
 
+// 模式切换
 els.modePac.onclick = () => setMode('pac_script');
 els.modeFixed.onclick = () => setMode('fixed_servers');
 els.modeDirect.onclick = () => setMode('direct');
+els.modeSystem.onclick = () => setMode('system');
 
 function setMode(mode) {
   const config = { mode: mode };
@@ -209,31 +245,30 @@ function setMode(mode) {
         applySetting(config, mode); 
       } else { alert("请先添加服务器"); chrome.runtime.openOptionsPage(); }
     });
-  } else applySetting(config, mode);
+  } else {
+    // direct or system
+    applySetting(config, mode);
+  }
 }
 
-// popup.js applySetting 函数
 function applySetting(c, m) { 
   chrome.proxy.settings.set({ value: c, scope: 'regular' }, () => { 
     currentMode = m; 
     updateModeUI(m); 
-    
-    // 强制刷新一次配置缓存（虽然 storage listener 会触发，但手动触发更稳）
+    // 刷新状态
     chrome.storage.local.get(null, (items) => {
         checkDomainStatus(items);
     });
-    
     chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
-    
-    // 新增：给个震动反馈或视觉反馈（可选）
   }); 
 }
 
 function updateModeUI(m) {
-  [els.modePac, els.modeFixed, els.modeDirect].forEach(e => e.classList.remove('active'));
+  [els.modePac, els.modeFixed, els.modeDirect, els.modeSystem].forEach(e => e.classList.remove('active'));
   if (m === 'pac_script') els.modePac.classList.add('active');
   else if (m === 'fixed_servers') els.modeFixed.classList.add('active');
   else if (m === 'direct') els.modeDirect.classList.add('active');
+  else if (m === 'system') els.modeSystem.classList.add('active');
 }
 
 function getRootDomain(hostname) {
