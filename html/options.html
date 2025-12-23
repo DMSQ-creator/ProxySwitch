@@ -1,4 +1,3 @@
-<!-- html/options.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -90,7 +89,7 @@
     .btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
     .btn-danger:hover { background: var(--danger); color: #fff; }
     
-    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-main); text-decoration: none; }
     .btn-ghost:hover { border-color: var(--text-sub); background: var(--bg-body); }
     
     .btn-success { background: var(--success); color: #fff; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3); }
@@ -134,7 +133,8 @@
       <li class="menu-item" data-target="sync"><span>☁️</span> 云端同步</li>
       <li class="menu-item" data-target="about"><span>⚙️</span> 通用设置</li>
     </ul>
-  <div class="menu-footer" id="appVersion">Version ...</div>
+    <!-- 自动版本号 id="appVersion" -->
+    <div class="menu-footer" id="appVersion">Version ...</div>
   </aside>
 
   <main class="app-main">
@@ -224,10 +224,29 @@
           <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm);">
             <div>
               <div style="font-weight:600; font-size:14px;">当前状态</div>
+              <!-- 显示详细更新时间的地方 -->
               <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">未加载</div>
             </div>
             <button id="updateGfwBtn" class="btn btn-success">🔄 立即更新规则库</button>
           </div>
+
+          <!-- 【新增】 GFWList 内容预览折叠区 -->
+          <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
+            <div style="display:flex; justify-content: space-between; align-items: center; cursor: pointer;" id="toggleGfwPreviewBtn">
+              <span style="font-size: 13px; font-weight: 600; color: var(--text-sub);">📜 规则列表预览</span>
+              <span id="gfwPreviewArrow" style="font-size: 12px; color: var(--text-sub); transition: transform 0.2s;">▼</span>
+            </div>
+            
+            <div id="gfwPreviewArea" style="display: none; margin-top: 12px; animation: fadeIn 0.2s;">
+              <textarea id="gfwContentBox" readonly 
+                style="width: 100%; height: 300px; font-family: monospace; font-size: 12px; line-height: 1.5; background: var(--bg-body); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); resize: vertical; padding: 10px; box-sizing: border-box;" 
+                placeholder="暂无规则数据..."></textarea>
+              <div class="help-text" style="text-align: right; margin-top: 5px;">
+                ⚠️ 此处为只读预览。如需自定义，请前往“规则管理”添加黑白名单。
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -279,6 +298,44 @@
       <!-- 通用设置 -->
       <div id="section-about" class="section">
         <h2>通用设置</h2>
+
+        <!-- 【新增】 关于信息卡片 -->
+        <div class="card" style="text-align:center; padding: 40px 24px;">
+          <!-- Logo -->
+          <img src="../assets/icon.png" style="width: 64px; height: 64px; margin-bottom: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+          
+          <!-- 标题与简介 -->
+          <h3 style="margin: 0 0 8px 0; font-size: 22px; color: var(--text-main);">ProxySwitch</h3>
+          <!-- 自动版本号 id="aboutVersion" -->
+          <div style="font-size: 14px; color: var(--text-sub); margin-bottom: 24px;">
+            专业的代理切换与规则管理工具 <span id="aboutVersion">v...</span>
+          </div>
+          
+          <p style="font-size: 14px; line-height: 1.6; color: var(--text-sub); max-width: 600px; margin: 0 auto 32px auto;">
+            ProxySwitch 致力于提供最流畅的浏览器代理管理体验。支持 SOCKS5/HTTP 代理协议、GFWList 自动分流、
+            以及强大的自定义规则与云端同步功能。本项目完全开源，遵循 MIT 协议，不收集任何用户隐私数据。
+          </p>
+      
+          <!-- 按钮组 (请替换为您真实的链接) -->
+          <div style="display: flex; justify-content: center; gap: 16px; margin-bottom: 32px;">
+            <a href="https://github.com/DMSQ-creator/ProxySwitch/ProxySwitch" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
+              <span style="font-size: 18px;">🐙</span> GitHub 仓库
+            </a>
+            <a href="https://github.com/DMSQ-creator/ProxySwitch/issues" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
+              <span style="font-size: 18px;">🐛</span> 反馈问题
+            </a>
+          </div>
+      
+          <!-- 版权信息 -->
+          <div style="border-top: 1px solid var(--border); padding-top: 24px; font-size: 12px; color: var(--text-sub); line-height: 1.5;">
+            <p style="margin: 0;">Copyright © 2025 ProxySwitch Team. All rights reserved.</p>
+            <p style="margin: 4px 0 0 0;">
+              Made with ❤️ by Developers. 
+              License: <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: var(--primary); text-decoration: none;">MIT License</a>
+            </p>
+          </div>
+        </div>
+
         <div class="card">
           <div class="form-group">
             <label>界面主题</label>

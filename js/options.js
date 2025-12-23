@@ -1,4 +1,4 @@
-// js/options.js - ProxySwitch
+// js/options.js - ProxySwitch (v7.6.1)
 
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
 // 保持 HTTP 以避免证书问题，用于测试代理连通性
@@ -14,9 +14,14 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // --- 自动设置版本号 ---
   const manifest = chrome.runtime.getManifest();
-  const versionEl = document.getElementById('appVersion');
-  if (versionEl) versionEl.textContent = `Version ${manifest.version}`;
+  // 设置左下角的版本号
+  const footerVerEl = document.getElementById('appVersion');
+  if (footerVerEl) footerVerEl.textContent = `Version ${manifest.version}`;
+  // 设置关于页面的版本号
+  const aboutVerEl = document.getElementById('aboutVersion');
+  if (aboutVerEl) aboutVerEl.textContent = `v${manifest.version}`;
   
   await loadAllData();
   applyTheme(allData.theme || 'system');
@@ -39,15 +44,22 @@ async function loadAllData() {
     });
   });
 }
+
 function renderAll() {
   renderServerList();
   if (currentSection === 'rules') renderRuleList();
+  
+  // 刷新 GFWList 状态 (这里会显示保存的时间)
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
+  
   if (allData.lastSyncTime) updateSyncUI(allData.lastSyncTime);
+  
+  // --- 【修复】GFWList URL 回显逻辑 ---
   const savedUrl = allData.gfwlistUrl || DEFAULT_GFWLIST_URL;
   const gfwSelect = $('#gfwSourceSelect');
   const gfwInput = $('#gfwUrlInput');
   const isPreset = Array.from(gfwSelect.options).some(o => o.value === savedUrl);
+
   if (isPreset) {
     gfwSelect.value = savedUrl;
     gfwInput.style.display = 'none';
@@ -57,7 +69,7 @@ function renderAll() {
     gfwInput.value = savedUrl;
   }
   
-  // 5. 刷新同步设置相关的输入框
+  // 刷新同步配置
   $('#gitToken').value = allData.gitToken || '';
   $('#davUrl').value = allData.davUrl || '';
   $('#davUser').value = allData.davUser || '';
@@ -65,8 +77,6 @@ function renderAll() {
   
   $('#syncProvider').value = allData.syncProvider || 'github';
   $('#autoSync').checked = allData.autoSync || false;
-  
-  // 6. 切换同步面板显示
   switchSyncPanel();
 }
 
@@ -411,31 +421,34 @@ function deleteRule(domain) {
   chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); });
 }
 
-// --- GFW 模块 (重点修复) ---
+// --- GFW 模块 (核心修复) ---
 function initGfwModule() {
   $('#gfwSourceSelect').onchange = (e) => {
     const val = e.target.value;
     if (val === 'custom') {
       $('#gfwUrlInput').style.display = 'block';
+      // 切换到 custom 时，如果输入框有值也存一下
       const currentInput = $('#gfwUrlInput').value.trim();
-      if (currentInput) {
-        chrome.storage.local.set({ gfwlistUrl: currentInput });
-      }
+      if (currentInput) chrome.storage.local.set({ gfwlistUrl: currentInput });
     } else { 
       $('#gfwUrlInput').style.display = 'none'; 
       chrome.storage.local.set({ gfwlistUrl: val }); 
     }
   };
-  // 2. 【新增修复】监听自定义输入框的输入，实时保存
+
+  // 【修复】实时监听自定义输入框，确保打字时就保存，防止同步时为空
   $('#gfwUrlInput').addEventListener('input', (e) => {
     const val = e.target.value.trim();
     chrome.storage.local.set({ gfwlistUrl: val });
   });
+
   const savedUrl = allData.gfwlistUrl || DEFAULT_GFWLIST_URL;
   if (Array.from($('#gfwSourceSelect').options).some(o=>o.value===savedUrl)) $('#gfwSourceSelect').value = savedUrl;
   else { $('#gfwSourceSelect').value = 'custom'; $('#gfwUrlInput').style.display = 'block'; $('#gfwUrlInput').value = savedUrl; }
+  
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
   
+  // 更新按钮逻辑
   $('#updateGfwBtn').onclick = async () => {
     let url = $('#gfwSourceSelect').value;
     if (url === 'custom') url = $('#gfwUrlInput').value.trim();
@@ -452,40 +465,31 @@ function initGfwModule() {
       
       const domainSet = new Set(decoded.split(/\r?\n/)
         .map(l => l.trim())
-        // 1. 过滤无效行
         .filter(l => l && !l.startsWith('!') && !l.startsWith('[') && !l.startsWith('@'))
         .map(l => {
-          // 2. 移除 AutoProxy 前缀
-          // 必须先移除前缀，否则后续正则可能匹配错误
           let clean = l.replace(/^\|\|/, '')
                        .replace(/^\|/, '')
                        .replace(/^https?:\/\//, '');
-          
-          // [关键修复] 移除域名前可能残留的点（例如 ||.google.com -> .google.com -> google.com）
-          // 这一步确保了存入 PAC 映射表的 Key 是纯净的
           return clean.replace(/^\.+/, '');
         })
         .map(l => {
-          // 3. 提取纯域名
           const match = l.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/); 
           return match ? match[1] : null;
         })
-        // 4. 最终过滤
         .filter(d => d && d.includes('.') && !d.includes('*'))
       );
       
       const domains = Array.from(domainSet); 
+      // 获取当前详细时间
       const now = new Date().toLocaleString();
       
-      // 保存并刷新
+      // 保存数据
       chrome.storage.local.set({ gfwDomains: domains, ruleCount: domains.length, lastUpdate: now, gfwlistUrl: url }, async () => {
         await loadAllData(); 
         updateGfwStatus(domains.length, now); 
         showToast(`GFWList 更新成功: ${domains.length} 条规则`);
         $('#updateGfwBtn').textContent = "🔄 立即更新"; 
         $('#updateGfwBtn').disabled = false;
-        
-        // 触发一次代理刷新，确保新规则生效
         chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
       });
       
@@ -495,8 +499,45 @@ function initGfwModule() {
       $('#updateGfwBtn').disabled = false; 
     }
   };
+
+  // --- 【新增】预览折叠逻辑 ---
+  const toggleBtn = $('#toggleGfwPreviewBtn');
+  const previewArea = $('#gfwPreviewArea');
+  const arrow = $('#gfwPreviewArrow');
+  const textBox = $('#gfwContentBox');
+
+  toggleBtn.onclick = () => {
+    const isHidden = previewArea.style.display === 'none';
+    
+    if (isHidden) {
+      // 展开
+      previewArea.style.display = 'block';
+      arrow.style.transform = 'rotate(180deg)';
+      
+      // 懒加载数据：只有当数据未填充或更新时间改变时才刷新内容
+      if (!textBox.value || allData.lastUpdate !== textBox.dataset.lastVer) {
+        const list = allData.gfwDomains || [];
+        if (list.length > 0) {
+          textBox.value = list.join('\n');
+        } else {
+          textBox.value = "（暂无数据，请点击更新按钮）";
+        }
+        textBox.dataset.lastVer = allData.lastUpdate;
+      }
+      
+    } else {
+      // 收起
+      previewArea.style.display = 'none';
+      arrow.style.transform = 'rotate(0deg)';
+    }
+  };
 }
-function updateGfwStatus(c, t) { $('#gfwStatus').textContent = c ? `✅ 已缓存 ${c} 条 (更新于 ${t})` : "⚠️ 未加载"; }
+
+// 显示详细的更新时间
+function updateGfwStatus(c, t) { 
+    // t 变量就是保存的日期字符串，例如 "2025/12/23 20:30:00"
+    $('#gfwStatus').textContent = c ? `✅ 已缓存 ${c} 条 (更新于 ${t})` : "⚠️ 未加载"; 
+}
 
 // --- 同步模块 ---
 function initSyncModule() {
@@ -522,7 +563,7 @@ function initSyncModule() {
     chrome.runtime.sendMessage({type: 'MANUAL_SYNC_DOWNLOAD'}, async (res) => {
        if (res && res.success) {
            await loadAllData();
-           renderAll();
+           renderAll(); // 重新渲染界面，这会包含 GFWList URL 的回显
            showToast("下载成功，配置已更新");
        } else showToast("下载失败: " + (res.error || "未知"));
     });
