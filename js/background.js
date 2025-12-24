@@ -51,8 +51,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
     if (changes.userRules || changes.userWhitelist || changes.gfwDomains || 
         changes.serverList || changes.activeServerId || changes.tempRules) {
+      
+      // 直接触发更新逻辑
       debouncedUpdate();
-      chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
       
       if (!isSyncing && (changes.userRules || changes.userWhitelist || changes.serverList)) {
         chrome.storage.local.get(['autoSync'], (s) => { 
@@ -199,7 +200,7 @@ function applyProxySettings(items) {
   });
 }
 
-// --- 同步逻辑 (保持不变) ---
+// --- 同步逻辑 ---
 async function bgWebdavUpload(i, d){
   const a = 'Basic ' + btoa(i.davUser + ':' + i.davPass);
   const r = i.davUrl.endsWith('/') ? i.davUrl : i.davUrl + '/';
@@ -239,7 +240,8 @@ async function performCloudUpload(){
         if (exist) gistId = exist.id;
       } catch(e) {}
       const body = {
-        description: "ProxySwitch Config Sync (Obfuscated)",
+        // 修改这里的描述为 Backup
+        description: "ProxySwitch Config Backup (Obfuscated)",
         public: false,
         files: { [CONFIG_FILE_NAME]: { content: JSON.stringify(finalBody) } }
       };
@@ -291,21 +293,17 @@ async function ghFetch(url, method, token, body) {
   return await res.json();
 }
 
-// --- 【重构】图标管理模块 ---
-
-/**
- * 预渲染所有可能的图标状态，存入 iconDataCache
- */
+// --- 图标管理模块 ---
 async function preloadAllIcons() {
   const configs = [
-    { key: 'fixed',    c: "#8b5cf6", t: "G" }, // 全局紫
-    { key: 'direct',   c: "#0ea5e9", t: "D" }, // 直连蓝
-    { key: 'system',   c: "#64748b", t: "S" }, // 系统灰
-    { key: 'pac_gray', c: "#94a3b8", t: "A" }, // 自动灰 (直连)
-    { key: 'pac_green',c: "#10b981", t: "A" }, // 自动绿 (GFW)
-    { key: 'pac_blue', c: "#0ea5e9", t: "W" }, // 自动蓝 (白名单)
-    { key: 'pac_org',  c: "#f59e0b", t: "T" }, // 自动橙 (临时)
-    { key: 'pac_purp', c: "#8b5cf6", t: "M" }  // 自动紫 (黑名单)
+    { key: 'fixed',    c: "#8b5cf6", t: "G" }, 
+    { key: 'direct',   c: "#0ea5e9", t: "D" }, 
+    { key: 'system',   c: "#64748b", t: "S" }, 
+    { key: 'pac_gray', c: "#94a3b8", t: "A" }, 
+    { key: 'pac_green',c: "#10b981", t: "A" }, 
+    { key: 'pac_blue', c: "#0ea5e9", t: "W" }, 
+    { key: 'pac_org',  c: "#f59e0b", t: "T" }, 
+    { key: 'pac_purp', c: "#8b5cf6", t: "M" } 
   ];
   
   for (const cfg of configs) {
@@ -342,23 +340,14 @@ function createIconImageData(color, text) {
   return ctx.getImageData(0,0,32,32);
 }
 
-/**
- * 设置全局图标 (无 tabId)，作为浏览器重置时的默认值
- * 这就是 SwitchyOmega 不闪的核心原因
- */
 function setGlobalIcon(key) {
   if (iconDataCache[key]) {
     chrome.action.setIcon({ imageData: iconDataCache[key] });
   }
 }
 
-/**
- * 根据代理模式更新全局图标
- */
 function handleGlobalIconUpdate(mode) {
   if (mode === 'pac_script') {
-    // 自动模式下，默认图标设为“灰色 A”
-    // 这样加载直连页面时，重置为灰色 A，计算结果也是灰色 A -> 视觉无变化
     setGlobalIcon('pac_gray');
   } else if (mode === 'fixed_servers') {
     setGlobalIcon('fixed');
@@ -375,13 +364,11 @@ function getSafeHostname(urlStr) {
 }
 
 function updateTabIcon(tabId, url) {
-  // 如果不是 PAC 模式，根本不需要单独画图标，全局图标已经处理好了
   if (currentProxyMode !== 'pac_script') return;
 
   const hostname = getSafeHostname(url);
   
-  // 智能计算 PAC 状态
-  let iconKey = 'pac_gray'; // 默认直连灰
+  let iconKey = 'pac_gray'; 
   let title = "自动分流 (直连)";
 
   if (hostname) {
@@ -391,11 +378,7 @@ function updateTabIcon(tabId, url) {
     else if (checkSet(hostname, cachedGfwDomains)) { iconKey = 'pac_green'; title = "自动分流 (代理中)"; }
   }
 
-  // 性能优化：直接设置 ImageData，不创建 Canvas
   if (iconDataCache[iconKey]) {
-    // 如果算出来的就是默认的灰色A，其实可以不设置，因为全局就是灰色A。
-    // 但为了保险起见（比如之前是绿色，现在切回了灰色页面），还是设置一下。
-    // chrome.action.setIcon 对相同数据非常快。
     chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabId });
     chrome.action.setTitle({ title: `ProxySwitch: ${title}`, tabId: tabId });
   }
@@ -427,8 +410,6 @@ function checkSet(h, s) {
 }
 
 // --- 事件监听 ---
-
-// 优化：只在 PAC 模式下监听
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (currentProxyMode === 'pac_script' && tab.url) { 
     await initPromise; 

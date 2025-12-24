@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "ProxySwitch",
   "description": "Professional Proxy Manager. 专业的代理切换与规则管理工具。",
-  "version": "7.6.3",
+  "version": "7.6.5",
   "permissions": [
-    "proxy", "storage", "tabs", "alarms", "webNavigation"
+    "proxy", "storage", "tabs" 
   ],
   "host_permissions": [
     "http://*/*", "https://*/*"

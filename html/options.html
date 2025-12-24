@@ -130,10 +130,9 @@
       <li class="menu-item active" data-target="server"><span>📡</span> 服务器配置</li>
       <li class="menu-item" data-target="rules"><span>📝</span> 规则管理</li>
       <li class="menu-item" data-target="gfw"><span>🌏</span> GFWList</li>
-      <li class="menu-item" data-target="sync"><span>☁️</span> 云端同步</li>
+      <li class="menu-item" data-target="sync"><span>☁️</span> 云端备份</li>
       <li class="menu-item" data-target="about"><span>⚙️</span> 通用设置</li>
     </ul>
-    <!-- 自动版本号 id="appVersion" -->
     <div class="menu-footer" id="appVersion">Version ...</div>
   </aside>
 
@@ -224,13 +223,12 @@
           <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm);">
             <div>
               <div style="font-weight:600; font-size:14px;">当前状态</div>
-              <!-- 显示详细更新时间的地方 -->
               <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">未加载</div>
             </div>
             <button id="updateGfwBtn" class="btn btn-success">🔄 立即更新规则库</button>
           </div>
 
-          <!-- 【新增】 GFWList 内容预览折叠区 -->
+          <!-- GFWList 预览 -->
           <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
             <div style="display:flex; justify-content: space-between; align-items: center; cursor: pointer;" id="toggleGfwPreviewBtn">
               <span style="font-size: 13px; font-weight: 600; color: var(--text-sub);">📜 规则列表预览</span>
@@ -246,16 +244,15 @@
               </div>
             </div>
           </div>
-
         </div>
       </div>
 
-      <!-- 云同步 -->
+      <!-- 云端备份 -->
       <div id="section-sync" class="section">
-        <h2>云端同步 <span id="syncStatusBadge" class="server-tag" style="background:#ccc; color:#fff; margin-left:10px;">未同步</span></h2>
+        <h2>云端备份 <span id="syncStatusBadge" class="server-tag" style="background:#ccc; color:#fff; margin-left:10px;">未备份</span></h2>
         <div class="card">
           <div class="form-group">
-            <label>同步服务提供商</label>
+            <label>备份服务提供商</label>
             <div style="display:flex; gap:15px;">
               <select id="syncProvider" style="flex:1">
                 <option value="github">GitHub Gist (推荐，稳定免费)</option>
@@ -263,7 +260,7 @@
               </select>
               <div style="display:flex; align-items:center;">
                 <input type="checkbox" id="autoSync" style="width:auto; margin-right:8px;">
-                <span style="font-size:13px;">自动同步 (每24h)</span>
+                <span style="font-size:13px;">自动上传 (变更时)</span>
               </div>
             </div>
           </div>
@@ -289,7 +286,7 @@
           </div>
 
           <div style="display:flex; justify-content:center; gap:20px;">
-             <button id="cloudUploadBtn" class="btn btn-primary" style="width:160px; justify-content:center;">⬆️ 上传配置</button>
+             <button id="cloudUploadBtn" class="btn btn-primary" style="width:160px; justify-content:center;">⬆️ 上传备份</button>
              <button id="cloudDownloadBtn" class="btn btn-ghost" style="width:160px; justify-content:center;">⬇️ 下载覆盖</button>
           </div>
         </div>
@@ -299,24 +296,18 @@
       <div id="section-about" class="section">
         <h2>通用设置</h2>
 
-        <!-- 【新增】 关于信息卡片 -->
         <div class="card" style="text-align:center; padding: 40px 24px;">
-          <!-- Logo -->
           <img src="../assets/icon.png" style="width: 64px; height: 64px; margin-bottom: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-          
-          <!-- 标题与简介 -->
           <h3 style="margin: 0 0 8px 0; font-size: 22px; color: var(--text-main);">ProxySwitch</h3>
-          <!-- 自动版本号 id="aboutVersion" -->
           <div style="font-size: 14px; color: var(--text-sub); margin-bottom: 24px;">
             专业的代理切换与规则管理工具 <span id="aboutVersion">v...</span>
           </div>
           
           <p style="font-size: 14px; line-height: 1.6; color: var(--text-sub); max-width: 600px; margin: 0 auto 32px auto;">
             ProxySwitch 致力于提供最流畅的浏览器代理管理体验。支持 SOCKS5/HTTP 代理协议、GFWList 自动分流、
-            以及强大的自定义规则与云端同步功能。本项目完全开源，遵循 MIT 协议，不收集任何用户隐私数据。
+            以及强大的自定义规则与云端备份功能。本项目完全开源，遵循 MIT 协议，不收集任何用户隐私数据。
           </p>
       
-          <!-- 按钮组 (请替换为您真实的链接) -->
           <div style="display: flex; justify-content: center; gap: 16px; margin-bottom: 32px;">
             <a href="https://github.com/DMSQ-creator/ProxySwitch/ProxySwitch" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
               <span style="font-size: 18px;">🐙</span> GitHub 仓库
@@ -326,7 +317,6 @@
             </a>
           </div>
       
-          <!-- 版权信息 -->
           <div style="border-top: 1px solid var(--border); padding-top: 24px; font-size: 12px; color: var(--text-sub); line-height: 1.5;">
             <p style="margin: 0;">Copyright © 2025 ProxySwitch Team. All rights reserved.</p>
             <p style="margin: 4px 0 0 0;">

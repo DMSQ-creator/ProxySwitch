@@ -1,4 +1,4 @@
-// js/options.js - ProxySwitch (v7.6.1)
+// js/options.js
 
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
 // 保持 HTTP 以避免证书问题，用于测试代理连通性
