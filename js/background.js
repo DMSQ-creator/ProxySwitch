@@ -47,14 +47,31 @@ chrome.runtime.onInstalled.addListener(async (d) => {
 
 const debouncedUpdate = debounce(updateCacheAndApply, 500);
 
+
+
+// 定义一个白名单：只有这些设置变了，才允许刷新后台
+// 这样就过滤掉了 'pacScriptData'，防止死循环
+const AUTO_UPDATE_KEYS = [
+  'userRules', 
+  'userWhitelist', 
+  'gfwDomains', 
+  'tempRules', 
+  'serverList', 
+  'activeServerId'
+];
+
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
-    if (changes.userRules || changes.userWhitelist || changes.gfwDomains || 
-        changes.serverList || changes.activeServerId || changes.tempRules) {
-      
-      // 直接触发更新逻辑
+    // 1. 检查本次变动中，是否包含上面列表里的任意一个 key
+    // Object.keys(changes) 拿到了这次所有变动的字段名
+    // .some(...) 判断其中是否有我们关心的字段
+    const hasConfigChange = Object.keys(changes).some(key => AUTO_UPDATE_KEYS.includes(key));
+    
+    // 2. 只有确认是配置变了，才刷新
+    if (hasConfigChange) {
       debouncedUpdate();
       
+      // 3. 处理自动同步逻辑
       if (!isSyncing && (changes.userRules || changes.userWhitelist || changes.serverList)) {
         chrome.storage.local.get(['autoSync'], (s) => { 
           if (s.autoSync) triggerAutoUpload(); 
@@ -101,102 +118,124 @@ function normalizeSet(list) {
   }).filter(Boolean));
 }
 
-function updateCacheAndApply() {
+function updateCacheAndApply(specificTabId, specificUrl) {
   chrome.storage.local.get(null, (items) => {
+    // 1. 更新内存缓存
     cachedUserRules = normalizeSet(items.userRules);
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
     cachedTempRules = normalizeSet(items.tempRules);
-    applyProxySettings(items);
-    if (initReadyResolver) {
-      initReadyResolver();
-      initReadyResolver = null;
-    }
-    updateIconForActiveTab();
+    
+    // 2. 应用设置 (生成 PAC 并注入)
+    applyProxySettings(items, () => {
+        // 3. 设置应用完毕后的回调
+        if (initReadyResolver) {
+          initReadyResolver();
+          initReadyResolver = null;
+        }
+        
+        // 4. 更新图标
+        if (specificTabId && specificUrl) {
+           // 针对性更新（来自 Popup 的操作）
+           updateTabIcon(specificTabId, specificUrl);
+        } else {
+           // 常规更新
+           updateIconForActiveTab();
+        }
+    });
   });
 }
 
-function applyProxySettings(items) {
+function applyProxySettings(items, callback) {
   const servers = items.serverList || [];
   const activeServer = servers.find(s => s.id === items.activeServerId) || servers[0];
   
-  if (!activeServer) {
-    chrome.proxy.settings.set({ value: { mode: "direct" }, scope: 'regular' });
-    setGlobalIcon('direct');
-    return;
-  }
+  // 1. 生成 PAC 脚本内容
+  let pacScriptStr = "";
+  if (activeServer) {
+      let host = (activeServer.host || "127.0.0.1").trim();
+      if (/[^\x00-\x7F]/.test(host)) { try { host = new URL('http://'+host).hostname; } catch(e){ host="127.0.0.1"; } }
+      let port = parseInt(activeServer.port, 10);
+      if (isNaN(port) || port < 1 || port > 65535) port = 1080; 
+      const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
+      let pacProxyType = "SOCKS5"; 
+      if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";  
+      else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
+      
+      const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
+      const rawUserRules = Array.from(cachedUserRules || []);
+      const wildcardRules = rawUserRules.filter(r => r.includes('*'));
+      const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
+      const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
 
-  let host = (activeServer.host || "127.0.0.1").trim();
-  if (/[^\x00-\x7F]/.test(host)) {
-    try { host = new URL('http://' + host).hostname; } catch(e) { host = "127.0.0.1"; }
-  }
-  let port = parseInt(activeServer.port, 10);
-  if (isNaN(port) || port < 1 || port > 65535) port = 1080; 
-  const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
-  
-  let pacProxyType = "SOCKS5"; 
-  if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";  
-  else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
-  else if (scheme === 'SOCKS5') pacProxyType = "SOCKS5";   
-  const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
-
-  const rawUserRules = Array.from(cachedUserRules || []);
-  const wildcardRules = rawUserRules.filter(r => r.includes('*'));
-  const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
-  const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
-
-  const pacScriptStr = `
-    var Proxy = "${proxyStr}";
-    var Direct = "DIRECT";
-    var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
-    var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
-    var wList = ${JSON.stringify(wildcardRules)};
-    var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
-
-    function FindProxyForURL(url, host) {
-      if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
-      if (ipRegex.test(host)) {
-        if (isInNet(host, "10.0.0.0", "255.0.0.0") || 
-            isInNet(host, "172.16.0.0", "255.240.0.0") || 
-            isInNet(host, "192.168.0.0", "255.255.0.0") || 
-            isInNet(host, "127.0.0.0", "255.0.0.0")) {
+      pacScriptStr = `
+        var Proxy = "${proxyStr}";
+        var Direct = "DIRECT";
+        var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
+        var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
+        var wList = ${JSON.stringify(wildcardRules)};
+        var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
+        function FindProxyForURL(url, host) {
+          if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
+          if (ipRegex.test(host)) {
+            if (isInNet(host, "10.0.0.0", "255.0.0.0") || 
+                isInNet(host, "172.16.0.0", "255.240.0.0") || 
+                isInNet(host, "192.168.0.0", "255.255.0.0") || 
+                isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
+          }
+          host = host.toLowerCase();
+          if (check(host, dMap)) return Direct;
+          for (var i = 0; i < wList.length; i++) {
+            if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
+          }
+          if (check(host, pMap)) return Proxy;
           return Direct;
         }
-      }
-      host = host.toLowerCase();
-      if (check(host, dMap)) return Direct;
-      for (var i = 0; i < wList.length; i++) {
-        if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
-      }
-      if (check(host, pMap)) return Proxy;
-      return Direct;
-    }
+        function check(h, m) {
+          if (m[h]) return true;
+          var p = h.indexOf('.');
+          while (p !== -1) {
+            if (m[h.substring(p + 1)]) return true;
+            p = h.indexOf('.', p + 1);
+          }
+          return false;
+        }
+      `;
+  }
 
-    function check(h, m) {
-      if (m[h]) return true;
-      var p = h.indexOf('.');
-      while (p !== -1) {
-        if (m[h.substring(p + 1)]) return true;
-        p = h.indexOf('.', p + 1);
+  // 2. 优化：先读取旧的 PAC 数据进行对比，只有内容变了才写入
+  chrome.storage.local.get(['pacScriptData'], (oldData) => {
+      const oldPac = oldData.pacScriptData || "";
+      const hasChanged = oldPac !== pacScriptStr;
+
+      // 定义应用逻辑
+      const doApply = () => {
+          chrome.proxy.settings.get({}, (d) => {
+              const mode = (d && d.value) ? d.value.mode : 'direct';
+              currentProxyMode = mode;
+              handleGlobalIconUpdate(mode);
+
+              // 只有当内容变了，且当前是自动模式，才重新设置代理
+              if (mode === 'pac_script' && hasChanged && pacScriptStr) {
+                  chrome.proxy.settings.set({
+                      value: { mode: "pac_script", pacScript: { data: pacScriptStr } },
+                      scope: 'regular'
+                  }, () => {
+                      if (callback) callback();
+                  });
+              } else {
+                  if (callback) callback();
+              }
+          });
+      };
+
+      // 3. 只有当数据真的改变时，才写入 storage
+      // 这能避免死循环和减少卡顿
+      if (hasChanged) {
+          chrome.storage.local.set({ pacScriptData: pacScriptStr }, doApply);
+      } else {
+          doApply();
       }
-      return false;
-    }
-  `;
-
-  chrome.storage.local.set({ pacScriptData: pacScriptStr });
-  chrome.proxy.settings.get({}, (d) => {
-    if (chrome.runtime.lastError) console.warn(chrome.runtime.lastError);
-    const mode = (d && d.value) ? d.value.mode : 'direct';
-    
-    // 更新全局变量和图标状态
-    currentProxyMode = mode;
-    handleGlobalIconUpdate(mode);
-
-    if (mode === 'pac_script') {
-      chrome.proxy.settings.set({ value: { mode: "pac_script", pacScript: { data: pacScriptStr } }, scope: 'regular' });
-    } else if (mode === 'fixed_servers') {
-      chrome.proxy.settings.set({ value: { mode: "fixed_servers", rules: { singleProxy: { scheme: scheme.toLowerCase(), host, port } } }, scope: 'regular' });
-    }
   });
 }
 
@@ -346,16 +385,43 @@ function setGlobalIcon(key) {
   }
 }
 
+
 function handleGlobalIconUpdate(mode) {
+  // 1. 确定要使用哪个图标 Key
+  let iconKey = 'direct'; // 默认 fallback
+  
   if (mode === 'pac_script') {
-    setGlobalIcon('pac_gray');
+    iconKey = 'pac_gray'; // 自动模式的默认图标
   } else if (mode === 'fixed_servers') {
-    setGlobalIcon('fixed');
+    iconKey = 'fixed';
   } else if (mode === 'direct') {
-    setGlobalIcon('direct');
+    iconKey = 'direct';
   } else if (mode === 'system') {
-    setGlobalIcon('system');
+    iconKey = 'system';
   }
+
+  // 2. 设置全局默认图标 (给新标签页或未设置专用图标的标签页使用)
+  setGlobalIcon(iconKey);
+
+  // 3. 【核心修复】强制更新当前激活标签页的图标
+  // 这一步是为了覆盖掉自动模式下可能遗留的 "Sticky" (Tab专用) 图标
+  chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+    if (tabs && tabs[0]) {
+       // 直接对当前 tabId 设置图标，确保它立即变化，不再显示旧的自动分流图标
+       if (iconDataCache[iconKey]) {
+         chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabs[0].id });
+         
+         // 可选：顺便更新一下鼠标悬停标题
+         let title = "ProxySwitch";
+         if (mode === 'fixed_servers') title = "ProxySwitch: 全局代理";
+         else if (mode === 'direct') title = "ProxySwitch: 直接连接";
+         else if (mode === 'system') title = "ProxySwitch: 系统代理";
+         else if (mode === 'pac_script') title = "ProxySwitch: 自动分流";
+         
+         chrome.action.setTitle({ title: title, tabId: tabs[0].id });
+       }
+    }
+  });
 }
 
 function getSafeHostname(urlStr) {

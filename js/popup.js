@@ -259,7 +259,8 @@ function applySetting(c, m) {
     chrome.storage.local.get(null, (items) => {
         checkDomainStatus(items);
     });
-    chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
+    //chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
+    chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
   }); 
 }
 
@@ -286,8 +287,16 @@ function addRule(key) {
   const root = getRootDomain(currentTabDomain);
   chrome.storage.local.get([key], (i) => {
     const list = i[key] || []; 
-    if (!list.includes(root)) list.push(root);
-    chrome.storage.local.set({ [key]: list });
+    if (!list.includes(root)) {
+      list.push(root);
+      // 保存数据
+      chrome.storage.local.set({ [key]: list }, () => {
+        // 【核心修改】保存成功后，立即通知后台刷新 PAC 和图标
+        chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+        // 同时刷新 popup 自身的 UI 状态
+        checkDomainStatusWrapper();
+      });
+    }
   });
 }
 
@@ -295,10 +304,17 @@ function removeDomainRule() {
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist'], (i) => {
     const root = getRootDomain(currentTabDomain);
     const filterFn = d => d !== currentTabDomain && d !== root && d !== currentTabDomain.replace(/^www\./, '');
+    
+    // 保存数据
     chrome.storage.local.set({
       tempRules: (i.tempRules||[]).filter(filterFn),
       userWhitelist: (i.userWhitelist||[]).filter(filterFn),
       userRules: (i.userRules||[]).filter(filterFn)
+    }, () => {
+      // 【核心修改】保存成功后，立即通知后台刷新 PAC 和图标
+      chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+      // 同时刷新 popup 自身的 UI 状态
+      checkDomainStatusWrapper();
     });
   });
 }
