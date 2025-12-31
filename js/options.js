@@ -54,19 +54,12 @@ function renderAll() {
   
   if (allData.lastSyncTime) updateSyncUI(allData.lastSyncTime);
   
-  // --- 【修复】GFWList URL 回显逻辑 ---
-  const savedUrl = allData.gfwlistUrl || DEFAULT_GFWLIST_URL;
-  const gfwSelect = $('#gfwSourceSelect');
+  // --- GFWList URL 回显逻辑 ---
   const gfwInput = $('#gfwUrlInput');
-  const isPreset = Array.from(gfwSelect.options).some(o => o.value === savedUrl);
-
-  if (isPreset) {
-    gfwSelect.value = savedUrl;
-    gfwInput.style.display = 'none';
-  } else {
-    gfwSelect.value = 'custom';
-    gfwInput.style.display = 'block';
-    gfwInput.value = savedUrl;
+  if (gfwInput) {
+    // 直接读取保存的 URL，如果没有则为空（让 placeholder 显示）
+    gfwInput.value = allData.gfwlistUrl || '';
+    gfwInput.style.display = 'block'; // 确保它是显示的
   }
   
   // 刷新同步配置
@@ -211,13 +204,33 @@ function closeServerEdit() {
 
 function saveServer() {
   const name = $('#editName').value.trim() || "未命名";
-  let host = $('#editHost').value.trim().replace(/^https?:\/\//, '').replace(/^socks5?:\/\//, '');
+  
+  // 1. 获取原始输入并去空格
+  const rawHost = $('#editHost').value.trim();
+  
+  // 2. 【修复 Bug】检查地址是否为空
+  if (!rawHost) {
+    alert("❌ 服务器地址不能为空！(Host is required)");
+    $('#editHost').focus(); // 聚焦回输入框让用户填
+    return;
+  }
+
+  // 3. 清理协议头 (例如用户复制粘贴了 http://127.0.0.1)
+  let host = rawHost.replace(/^https?:\/\//i, '').replace(/^socks[45]?:\/\//i, '');
+  
+  // 4. 【修复 Bug】再次检查清理后是否为空 (防止用户只输入了 "http://")
+  if (!host) {
+    alert("❌ 请输入有效的服务器地址！");
+    $('#editHost').focus();
+    return;
+  }
 
   const portInput = $('#editPort').value.trim();
   let port = parseInt(portInput, 10);
 
   if (isNaN(port) || port < 1 || port > 65535) {
     alert("❌ 端口必须是 1 到 65535 之间的整数");
+    $('#editPort').focus();
     return;
   }
 
@@ -236,7 +249,10 @@ function saveServer() {
     await loadAllData(); 
     closeServerEdit();
     renderServerList();
-    showToast("保存成功");
+    showToast("✅ 服务器配置已保存");
+    
+    // 通知后台刷新代理设置
+    chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
   });
 }
 
@@ -388,7 +404,10 @@ function addRuleFromInput() {
   const input = $('#ruleAddInput');
   
   let rawVal = input.value.trim().toLowerCase();
-  if (!rawVal) return;
+  if (!rawVal) {
+    showToast("⚠️ 请输入域名");
+    return;
+  }
 
   let val = rawVal;
   try {
@@ -421,82 +440,112 @@ function deleteRule(domain) {
   chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); });
 }
 
-// --- GFW 模块 (核心修复) ---
+// --- GFW 模块 ---
 function initGfwModule() {
-  $('#gfwSourceSelect').onchange = (e) => {
-    const val = e.target.value;
-    if (val === 'custom') {
-      $('#gfwUrlInput').style.display = 'block';
-      // 切换到 custom 时，如果输入框有值也存一下
-      const currentInput = $('#gfwUrlInput').value.trim();
-      if (currentInput) chrome.storage.local.set({ gfwlistUrl: currentInput });
-    } else { 
-      $('#gfwUrlInput').style.display = 'none'; 
-      chrome.storage.local.set({ gfwlistUrl: val }); 
-    }
-  };
-
-  // 【修复】实时监听自定义输入框，确保打字时就保存，防止同步时为空
+  
+  // 1. 监听输入框变化，实时保存 (提升体验)
   $('#gfwUrlInput').addEventListener('input', (e) => {
     const val = e.target.value.trim();
     chrome.storage.local.set({ gfwlistUrl: val });
   });
 
-  const savedUrl = allData.gfwlistUrl || DEFAULT_GFWLIST_URL;
-  if (Array.from($('#gfwSourceSelect').options).some(o=>o.value===savedUrl)) $('#gfwSourceSelect').value = savedUrl;
-  else { $('#gfwSourceSelect').value = 'custom'; $('#gfwUrlInput').style.display = 'block'; $('#gfwUrlInput').value = savedUrl; }
+  // 2. 回显保存的 URL
+  // 如果没有保存过，留空，让 placeholder 提示用户
+  if (allData.gfwlistUrl) {
+    $('#gfwUrlInput').value = allData.gfwlistUrl;
+  }
   
+  // 更新状态显示
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
-  
-  // 更新按钮逻辑
+
+  // 3. 更新按钮逻辑
   $('#updateGfwBtn').onclick = async () => {
-    let url = $('#gfwSourceSelect').value;
-    if (url === 'custom') url = $('#gfwUrlInput').value.trim();
-    if (!url) return alert("请输入 URL");
+    // 直接获取输入框的值
+    const targetUrl = $('#gfwUrlInput').value.trim();
     
-    $('#updateGfwBtn').textContent = "⏳ 下载并解析中..."; 
-    $('#updateGfwBtn').disabled = true;
+    if (!targetUrl) {
+      alert("请先填入有效的规则列表 URL (Please enter a valid URL first)");
+      $('#gfwUrlInput').focus();
+      return;
+    }
+    
+    // 简单的 URL 格式校验
+    if (!targetUrl.startsWith('http')) {
+      alert("URL 必须以 http:// 或 https:// 开头");
+      return;
+    }
+    
+    const btn = $('#updateGfwBtn');
+    const originalBtnText = btn.textContent;
+    btn.textContent = "⏳ 下载并解析中..."; 
+    btn.disabled = true;
 
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("下载失败");
-      const text = await res.text();
-      const decoded = atob(text.replace(/\s/g, ''));
+      // Fetch user-provided URL
+      const response = await fetch(targetUrl);
+      if (!response.ok) {
+        throw new Error(`Download failed with status: ${response.status}`);
+      }
       
-      const domainSet = new Set(decoded.split(/\r?\n/)
-        .map(l => l.trim())
-        .filter(l => l && !l.startsWith('!') && !l.startsWith('[') && !l.startsWith('@'))
-        .map(l => {
-          let clean = l.replace(/^\|\|/, '')
-                       .replace(/^\|/, '')
-                       .replace(/^https?:\/\//, '');
-          return clean.replace(/^\.+/, '');
-        })
-        .map(l => {
-          const match = l.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/); 
-          return match ? match[1] : null;
-        })
-        .filter(d => d && d.includes('.') && !d.includes('*'))
-      );
+      const responseText = await response.text();
       
-      const domains = Array.from(domainSet); 
-      // 获取当前详细时间
-      const now = new Date().toLocaleString();
+      // --- Safety Parsing Logic (User Input) ---
+      // Attempts to decode Base64 if the user provided a Base64 source.
+      // Fallback to plain text if decoding fails.
+      let decodedText = "";
+      try {
+        const cleanBase64 = responseText.replace(/\s/g, '');
+        decodedText = atob(cleanBase64);
+      } catch (e) {
+        decodedText = responseText;
+      }
       
-      // 保存数据
-      chrome.storage.local.set({ gfwDomains: domains, ruleCount: domains.length, lastUpdate: now, gfwlistUrl: url }, async () => {
+      // Regex parsing for domains (Strict whitelist approach)
+      const lines = decodedText.split(/\r?\n/);
+      const validDomains = new Set();
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line || line.startsWith('!') || line.startsWith('[') || line.startsWith('@')) continue;
+        
+        let cleanLine = line.replace(/^\|\|/, '').replace(/^\|/, '').replace(/^https?:\/\//, '').replace(/^\.+/, '');
+        const domainMatch = cleanLine.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/);
+        
+        if (domainMatch) {
+          const extractedDomain = domainMatch[1];
+          if (extractedDomain.includes('.') && !extractedDomain.includes('*')) {
+            validDomains.add(extractedDomain);
+          }
+        }
+      }
+      
+      const domainArray = Array.from(validDomains); 
+      const updateTime = new Date().toLocaleString();
+      
+      if (domainArray.length === 0) {
+        throw new Error("未能解析出有效域名，请检查 URL 是否正确");
+      }
+
+      chrome.storage.local.set({ 
+        gfwDomains: domainArray, 
+        ruleCount: domainArray.length, 
+        lastUpdate: updateTime,
+        gfwlistUrl: targetUrl // 确保保存成功的 URL
+      }, async () => {
         await loadAllData(); 
-        updateGfwStatus(domains.length, now); 
-        showToast(`GFWList 更新成功: ${domains.length} 条规则`);
-        $('#updateGfwBtn').textContent = "🔄 立即更新"; 
-        $('#updateGfwBtn').disabled = false;
+        updateGfwStatus(domainArray.length, updateTime); 
+        showToast(`更新成功: ${domainArray.length} 条规则`);
+        btn.textContent = originalBtnText; 
+        btn.disabled = false;
         chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
       });
       
-    } catch(e) { 
-      alert("更新失败: " + e.message); 
-      $('#updateGfwBtn').textContent = "❌ 更新失败"; 
-      $('#updateGfwBtn').disabled = false; 
+    } catch(error) { 
+      console.error("Update Error:", error);
+      alert("更新失败: " + error.message); 
+      btn.textContent = "❌ 更新失败"; 
+      btn.disabled = false; 
+      setTimeout(() => { btn.textContent = originalBtnText; }, 2000);
     }
   };
 

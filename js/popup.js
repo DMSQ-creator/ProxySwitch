@@ -1,4 +1,4 @@
-// js/popup.js - ProxySwitch (Final Version)
+// js/popup.js - ProxySwitch (Fixed Version)
 
 const els = {
   serverSelect: document.getElementById('serverSelect'),
@@ -16,6 +16,7 @@ const els = {
   modeSystem: document.getElementById('mode-system'),
   
   // 操作按钮
+  actionArea: document.getElementById('actionArea'), // 包含按钮的父容器
   addBtnGroup: document.getElementById('addBtnGroup'),
   addRuleBtn: document.getElementById('addRuleBtn'),
   addTempRuleBtn: document.getElementById('addTempRuleBtn'),
@@ -89,13 +90,23 @@ function loadBaseConfig() {
 function analyzeCurrentTab() {
   chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
     const tab = tabs[0];
-    if (tab && tab.url) {
+    
+    // 【修复 1】严格校验 URL 协议
+    // 只有 http 或 https 页面才显示添加按钮，chrome:// 或 file:// 等页面不显示
+    if (tab && tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
       try {
-        if (!tab.url.startsWith('http')) throw new Error("Not http");
         const url = new URL(tab.url);
         currentTabDomain = url.hostname.toLowerCase();
+        
+        // 再次校验非空
+        if (!currentTabDomain) throw new Error("Empty hostname");
+
         els.domain.textContent = currentTabDomain;
-        els.domainArea.style.display = 'flex'; // 确保显示
+        els.domainArea.style.display = 'flex'; 
+        
+        // 默认先显示操作区，具体显示哪个按钮由 checkDomainStatus 决定
+        if (els.actionArea) els.actionArea.style.display = 'block';
+
         checkDomainStatusWrapper();
       } catch (e) {
         showInvalidPageUI();
@@ -107,31 +118,44 @@ function analyzeCurrentTab() {
 }
 
 function checkDomainStatusWrapper() {
-  if (!currentTabDomain) return;
+  // 如果域名为空，不要去查 storage，直接显示无效 UI
+  if (!currentTabDomain) {
+    showInvalidPageUI();
+    return;
+  }
   chrome.storage.local.get(null, (items) => {
     checkDomainStatus(items);
   });
 }
 
 function showInvalidPageUI() {
+  currentTabDomain = ""; // 确保变量清空
   els.domain.textContent = "当前页面无效";
   els.domainArea.style.display = 'flex';
-  els.status.textContent = "无法对此页面设置规则";
+  els.status.textContent = "无法设置规则";
   els.statusIcon.textContent = "🚫";
   
   const wrapper = document.querySelector('.domain-card');
   if (wrapper) {
-    wrapper.classList.remove('status-proxy', 'status-direct', 'status-user', 'status-temp');
-    wrapper.classList.add('status-fail');
+    wrapper.className = 'domain-card status-fail';
   }
   
-  // 隐藏所有按钮
-  els.addBtnGroup.style.display = 'none';
-  els.removeBtn.style.display = 'none';
+  // 【修复 2】关键：在无效页面（如新标签页），彻底隐藏所有操作按钮
+  // 这样用户就无法点击，也不会报错了
+  if (els.addBtnGroup) els.addBtnGroup.style.display = 'none';
+  if (els.removeBtn) els.removeBtn.style.display = 'none';
+  // 也可以隐藏整个底部区域
+  // if (els.actionArea) els.actionArea.style.display = 'none';
 }
 
 // 核心状态判断逻辑
 function checkDomainStatus(items) {
+  // 双重保险
+  if (!currentTabDomain) {
+    showInvalidPageUI();
+    return;
+  }
+
   const userRules = items.userRules || [];
   const tempRules = items.tempRules || [];
   const whitelist = items.userWhitelist || [];
@@ -174,15 +198,7 @@ function checkDomainStatus(items) {
 
   const wrapper = document.querySelector('.domain-card');
   if (wrapper) {
-    // 彻底清除所有可能的类名
-    wrapper.classList.remove(
-        'status-proxy', 
-        'status-direct', 
-        'status-fail', 
-        'status-user', 
-        'status-temp'
-    );
-    wrapper.classList.add(statusClass);
+    wrapper.className = `domain-card ${statusClass}`;
   }
   
   // 底部按钮逻辑
@@ -256,10 +272,7 @@ function applySetting(c, m) {
     currentMode = m; 
     updateModeUI(m); 
     // 刷新状态
-    chrome.storage.local.get(null, (items) => {
-        checkDomainStatus(items);
-    });
-    //chrome.runtime.sendMessage({type: 'UPDATE_ICON'});
+    if (currentTabDomain) checkDomainStatusWrapper();
     chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
   }); 
 }
@@ -273,6 +286,8 @@ function updateModeUI(m) {
 }
 
 function getRootDomain(hostname) {
+  if (!hostname) return null; // 防御
+  
   const parts = hostname.split('.');
   if (parts.length <= 2) return hostname;
   const last = parts[parts.length - 1];
@@ -284,14 +299,23 @@ function getRootDomain(hostname) {
 }
 
 function addRule(key) {
+  // 【修复 3】核心防御：如果当前域名为空（尚未获取到或无效页面），直接终止
+  // 这能防止即使按钮显示了，点击也不会报错
+  if (!currentTabDomain) {
+    console.warn("当前域名为空，无法添加规则");
+    return;
+  }
+
   const root = getRootDomain(currentTabDomain);
+  if (!root) return;
+
   chrome.storage.local.get([key], (i) => {
     const list = i[key] || []; 
     if (!list.includes(root)) {
       list.push(root);
       // 保存数据
       chrome.storage.local.set({ [key]: list }, () => {
-        // 【核心修改】保存成功后，立即通知后台刷新 PAC 和图标
+        // 保存成功后，立即通知后台刷新 PAC 和图标
         chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
         // 同时刷新 popup 自身的 UI 状态
         checkDomainStatusWrapper();
@@ -301,6 +325,8 @@ function addRule(key) {
 }
 
 function removeDomainRule() {
+  if (!currentTabDomain) return; // 防御
+
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist'], (i) => {
     const root = getRootDomain(currentTabDomain);
     const filterFn = d => d !== currentTabDomain && d !== root && d !== currentTabDomain.replace(/^www\./, '');
@@ -311,7 +337,7 @@ function removeDomainRule() {
       userWhitelist: (i.userWhitelist||[]).filter(filterFn),
       userRules: (i.userRules||[]).filter(filterFn)
     }, () => {
-      // 【核心修改】保存成功后，立即通知后台刷新 PAC 和图标
+      // 保存成功后，立即通知后台刷新 PAC 和图标
       chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
       // 同时刷新 popup 自身的 UI 状态
       checkDomainStatusWrapper();

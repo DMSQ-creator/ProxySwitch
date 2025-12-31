@@ -209,23 +209,27 @@
         <h2>GFWList 智能规则库</h2>
         <div class="card">
           <div class="info-tip">
-             💡 GFWList 是一个维护在 GitHub 上的被墙网站列表。启用后，插件会自动判断访问的域名是否在列表中，在则代理，不在则直连。
+            💡 GFWList 是社区维护的规则列表。由于商店政策限制，本扩展不内置规则源，请手动填入您信任的规则 URL。
           </div>
+          
           <div class="form-group">
-            <label>规则源地址</label>
-            <select id="gfwSourceSelect">
-              <option value="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt">GitHub Official (需要代理)</option>
-              <option value="https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt">jsDelivr CDN (推荐，速度快)</option>
-              <option value="custom">自定义 URL...</option>
-            </select>
-            <input type="text" id="gfwUrlInput" placeholder="输入 URL" style="display:none; margin-top:10px;">
+            <label>规则源地址 (URL)</label>
+            <!-- 移除 select，直接放 input -->
+            <input type="text" id="gfwUrlInput" placeholder="例如: https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt" style="display:block; width:100%;">
+            
+            <!-- 推荐引导链接 -->
+            <p class="help-text" style="margin-top: 8px; line-height: 1.5;">
+              没有地址？推荐前往 GitHub 官方仓库复制 "Raw" 文件链接：
+              <a href="https://github.com/gfwlist/gfwlist" target="_blank" style="color:var(--primary); text-decoration:underline;">🔗 https://github.com/gfwlist/gfwlist</a>
+            </p>
           </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm);">
+
+          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm); margin-top: 15px;">
             <div>
               <div style="font-weight:600; font-size:14px;">当前状态</div>
               <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">未加载</div>
             </div>
-            <button id="updateGfwBtn" class="btn btn-success">🔄 立即更新规则库</button>
+            <button id="updateGfwBtn" class="btn btn-success">🔄 下载并解析规则</button>
           </div>
 
           <!-- GFWList 预览 -->
@@ -266,7 +270,7 @@
           </div>
           
           <div class="info-tip" style="background:var(--bg-body); color:var(--text-sub); border:1px solid var(--border);">
-            ❕ 提示：上传的数据仅做 <b>Base64 编码</b> 混淆处理。
+            ❕ 提示：配置文件将以 <b>纯文本 JSON</b> 格式保存到云端。这方便您查看和编辑，请勿在服务器名称等字段中填写敏感密码。
           </div>
 
           <div id="panelGithub" style="background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
@@ -349,5 +353,4 @@
   <div id="toast">操作成功</div>
   <script src="../js/options.js"></script>
 </body>
-
 </html>
