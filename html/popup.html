@@ -230,7 +230,7 @@
 <body>
   <div id="app">
     <div class="header">
-      <div class="brand"><img src="../assets/icon.png" style="width:20px; height:20px;"> ProxySwitch</div>
+      <div class="brand"><img src="../assets/icon.png" style="width:20px; height:20px;"> __MSG_appName__</div>
       <div class="server-wrapper">
         <select id="serverSelect" class="server-select"></select>
         <span class="server-arrow">▼</span>
@@ -243,38 +243,38 @@
         <div class="icon-wrapper" id="statusRing"><span id="statusIcon">🚀</span></div>
         <div class="info-content">
           <div id="currentDomain" class="domain-text">google.com</div>
-          <div id="routingStatus" class="status-badge">检测中...</div>
+          <div id="routingStatus" class="status-badge">...</div>
         </div>
       </div>
 
       <!-- 模式切换 -->
-      <div class="mode-label">代理模式</div>
+      <div class="mode-label">Proxy Mode</div>
       <div class="mode-group segmented-control">
-        <div class="mode-btn" id="mode-pac" title="自动分流"><span>🤖</span> 自动</div>
-        <div class="mode-btn" id="mode-fixed" title="全局代理"><span>🚀</span> 全局</div>
-        <div class="mode-btn" id="mode-direct" title="直接连接"><span>🛡️</span> 直连</div>
-        <div class="mode-btn" id="mode-system" title="系统代理"><span>💻</span> 系统</div>
+        <div class="mode-btn" id="mode-pac" title="__MSG_popTitleAuto__"><span>🤖</span> __MSG_popModeAuto__</div>
+        <div class="mode-btn" id="mode-fixed" title="__MSG_popTitleGlobal__"><span>🚀</span> __MSG_popModeGlobal__</div>
+        <div class="mode-btn" id="mode-direct" title="__MSG_popTitleDirect__"><span>🛡️</span> __MSG_popModeDirect__</div>
+        <div class="mode-btn" id="mode-system" title="__MSG_popTitleSystem__"><span>💻</span> __MSG_popModeSystem__</div>
       </div>
       
       <!-- 操作按钮区 -->
       <div id="actionArea">
         <div id="addBtnGroup" style="display:flex; gap:10px; width:100%;">
           <button id="addRuleBtn" class="btn-action btn-add" style="flex:2;">
-            <span style="font-size:16px;padding-top: 4px;">+</span> 加入代理列表
+            <span style="font-size:16px;padding-top: 4px;">+</span> __MSG_popBtnAdd__
           </button>
-          <button id="addTempRuleBtn" class="btn-action btn-temp" style="flex:1;" title="浏览器重启后失效">
-            ⏱️ 临时
+          <button id="addTempRuleBtn" class="btn-action btn-temp" style="flex:1;" title="__MSG_popBtnTempHint__">
+            ⏱️ __MSG_popBtnTemp__
           </button>
         </div>
 
         <button id="removeBtn" class="btn-action btn-remove" style="display:none;">
-          🗑️ 移除此规则
+          🗑️ __MSG_popBtnRemove__
         </button>
       </div>
     </div>
     
     <div class="footer" id="openSettings">
-      <span style="font-size:14px">⚙️</span> 打开设置中心
+      <span style="font-size:14px">⚙️</span> __MSG_popFooter__
     </div>
   </div>
 

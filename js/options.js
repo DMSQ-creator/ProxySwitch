@@ -1,7 +1,6 @@
 // js/options.js
 
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
-// 保持 HTTP 以避免证书问题，用于测试代理连通性
 const LATENCY_TEST_URL = 'http://www.gstatic.com/generate_204';
 const MAX_DISPLAY_RULES = 500;
 
@@ -9,21 +8,49 @@ let currentSection = 'server';
 let currentRuleType = 'userRules'; 
 let allData = {}; 
 let editingServerId = null;
+let customMessages = null; // 用于存储强制加载的语言包
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// --- 核心：智能 i18n 函数 ---
+// 如果加载了自定义语言包，优先使用；否则使用系统默认
+const i18n = (key) => {
+  if (customMessages && customMessages[key]) {
+    return customMessages[key].message;
+  }
+  return chrome.i18n.getMessage(key) || "";
+};
+
+// --- 初始化入口 ---
 document.addEventListener('DOMContentLoaded', async () => {
-  // --- 自动设置版本号 ---
+  // 1. 加载所有数据（包括语言设置）
+  await loadAllData();
+  
+  // 2. 处理语言逻辑 (核心新增)
+  const userLang = allData.appLanguage || 'auto';
+  if (userLang !== 'auto') {
+    try {
+      // 强制去 _locales 目录加载对应的 json 文件
+      const url = chrome.runtime.getURL(`_locales/${userLang}/messages.json`);
+      const res = await fetch(url);
+      customMessages = await res.json();
+    } catch (e) {
+      console.error("Failed to load language:", e);
+    }
+  }
+
+  // 3. 执行翻译 (现在会使用正确的语言)
+  localizeHtmlPage();
+
+  // 4. 自动设置版本号
   const manifest = chrome.runtime.getManifest();
-  // 设置左下角的版本号
   const footerVerEl = document.getElementById('appVersion');
   if (footerVerEl) footerVerEl.textContent = `Version ${manifest.version}`;
-  // 设置关于页面的版本号
   const aboutVerEl = document.getElementById('aboutVersion');
   if (aboutVerEl) aboutVerEl.textContent = `v${manifest.version}`;
   
-  await loadAllData();
+  // 5. 应用主题与初始化模块
   applyTheme(allData.theme || 'system');
   
   initNav();
@@ -31,10 +58,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   initRuleModule();
   initGfwModule();
   initSyncModule();
-  initGeneralModule();
+  initGeneralModule(); // 这里会初始化语言下拉框
   
   renderAll();
 });
+
+// --- 翻译函数 (保持之前的修复版) ---
+function localizeHtmlPage() {
+  if (document.title.includes('__MSG_')) {
+    document.title = document.title.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
+  }
+
+  const attributes = ['placeholder', 'title', 'alt', 'value'];
+  const elements = document.querySelectorAll(attributes.map(attr => `[${attr}]`).join(','));
+  elements.forEach(el => {
+    attributes.forEach(attr => {
+      const val = el.getAttribute(attr);
+      if (val && val.includes('__MSG_')) {
+        const newVal = val.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
+        el.setAttribute(attr, newVal);
+      }
+    });
+  });
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node;
+  const nodesToReplace = [];
+  
+  while(node = walker.nextNode()) {
+    if (node.nodeValue.includes('__MSG_')) {
+      nodesToReplace.push(node);
+    }
+  }
+  
+  nodesToReplace.forEach(node => {
+    const parent = node.parentNode;
+    const translatedText = node.nodeValue.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
+    
+    if (translatedText.includes('<') && translatedText.includes('>')) {
+       const temp = document.createElement('span');
+       temp.innerHTML = translatedText;
+       while (temp.firstChild) {
+         parent.insertBefore(temp.firstChild, node);
+       }
+       parent.removeChild(node);
+    } else {
+       node.nodeValue = translatedText;
+    }
+  });
+}
+
+// --- 业务逻辑 ---
 
 async function loadAllData() {
   return new Promise(resolve => {
@@ -49,20 +123,15 @@ function renderAll() {
   renderServerList();
   if (currentSection === 'rules') renderRuleList();
   
-  // 刷新 GFWList 状态 (这里会显示保存的时间)
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
-  
   if (allData.lastSyncTime) updateSyncUI(allData.lastSyncTime);
   
-  // --- GFWList URL 回显逻辑 ---
   const gfwInput = $('#gfwUrlInput');
   if (gfwInput) {
-    // 直接读取保存的 URL，如果没有则为空（让 placeholder 显示）
     gfwInput.value = allData.gfwlistUrl || '';
-    gfwInput.style.display = 'block'; // 确保它是显示的
+    gfwInput.style.display = 'block'; 
   }
   
-  // 刷新同步配置
   $('#gitToken').value = allData.gitToken || '';
   $('#davUrl').value = allData.davUrl || '';
   $('#davUser').value = allData.davUser || '';
@@ -87,7 +156,6 @@ function initNav() {
   });
 }
 
-// --- 服务器模块 ---
 function initServerModule() {
   $('#addServerBtn').onclick = () => openServerEdit(null);
   $('#cancelServerItemBtn').onclick = closeServerEdit;
@@ -98,13 +166,11 @@ function initServerModule() {
     const mode = config.value.mode;
     
     if (mode === 'direct' || mode === 'system') {
-      if (!confirm("⚠️ 警告：当前处于 [直连] 或 [系统代理] 模式。\n测试结果将反映本地网络连接速度，而非代理服务器速度。\n\n是否继续？")) {
-        return;
-      }
+      if (!confirm(i18n("msgWarnDirect"))) return;
     }
     const resEl = $('#latencyResult');
     resEl.style.display = 'block';
-    resEl.innerHTML = '<span style="color:var(--text-sub)">⏳ 正在连接测试服务器...</span>';
+    resEl.innerHTML = `<span style="color:var(--text-sub)">${i18n("msgConnecting")}</span>`;
     $('#testLatencyBtn').disabled = true;
 
     const start = Date.now();
@@ -120,15 +186,13 @@ function initServerModule() {
       
       clearTimeout(timeoutId);
       const ms = Date.now() - start;
-      
       let color = 'var(--success)'; 
       if (ms > 500) color = 'var(--warning)';
       if (ms > 1500) color = 'var(--danger)';
-      
-      resEl.innerHTML = `<span style="color:${color}; font-weight:bold;">✅ 连接成功 - 延迟: ${ms} ms</span>`;
+      resEl.innerHTML = `<span style="color:${color}; font-weight:bold;">${i18n("msgSuccessLatency").replace('%MS%', ms)}</span>`;
     } catch (error) {
       const isTimeout = error.name === 'AbortError';
-      const errorMsg = isTimeout ? "连接超时 (>5000ms)" : "连接失败 (请检查代理配置)";
+      const errorMsg = isTimeout ? i18n("msgTimeout") : i18n("msgFail");
       resEl.innerHTML = `<span style="color:var(--danger); font-weight:bold;">❌ ${errorMsg}</span>`;
     } finally {
       $('#testLatencyBtn').disabled = false;
@@ -155,7 +219,7 @@ function renderServerList() {
     el.className = `server-item ${srv.id === activeId ? 'active' : ''}`;
     el.innerHTML = `
       <div>
-        <div style="font-weight:bold; color:var(--primary)">${srv.name} ${srv.id === activeId ? ' (使用中)' : ''}</div>
+        <div style="font-weight:bold; color:var(--primary)">${srv.name} ${srv.id === activeId ? i18n("msgUsing") : ''}</div>
         <div style="font-family:monospace; font-size:12px; color:var(--text-sub)">${srv.scheme}://${srv.host}:${srv.port}</div>
       </div>
       <div style="display:flex; gap:10px;">
@@ -175,7 +239,7 @@ function activateServer(id) {
   allData.activeServerId = id;
   chrome.storage.local.set({ activeServerId: id }, () => {
     renderServerList();
-    showToast("已切换服务器");
+    showToast(i18n("msgSwitchServer"));
   });
 }
 
@@ -190,7 +254,7 @@ function openServerEdit(id) {
     $('#editHost').value = srv.host;
     $('#editPort').value = srv.port;
   } else {
-    $('#editName').value = "新服务器";
+    $('#editName').value = i18n("msgNewServer");
     $('#editScheme').value = "SOCKS5";
     $('#editHost').value = "127.0.0.1";
     $('#editPort').value = "10808";
@@ -203,33 +267,26 @@ function closeServerEdit() {
 }
 
 function saveServer() {
-  const name = $('#editName').value.trim() || "未命名";
-  
-  // 1. 获取原始输入并去空格
+  const name = $('#editName').value.trim() || "Unknown";
   const rawHost = $('#editHost').value.trim();
   
-  // 2. 【修复 Bug】检查地址是否为空
   if (!rawHost) {
-    alert("❌ 服务器地址不能为空！(Host is required)");
-    $('#editHost').focus(); // 聚焦回输入框让用户填
+    alert(i18n("msgErrHost"));
+    $('#editHost').focus();
     return;
   }
 
-  // 3. 清理协议头 (例如用户复制粘贴了 http://127.0.0.1)
   let host = rawHost.replace(/^https?:\/\//i, '').replace(/^socks[45]?:\/\//i, '');
-  
-  // 4. 【修复 Bug】再次检查清理后是否为空 (防止用户只输入了 "http://")
   if (!host) {
-    alert("❌ 请输入有效的服务器地址！");
+    alert(i18n("msgErrValidHost"));
     $('#editHost').focus();
     return;
   }
 
   const portInput = $('#editPort').value.trim();
   let port = parseInt(portInput, 10);
-
   if (isNaN(port) || port < 1 || port > 65535) {
-    alert("❌ 端口必须是 1 到 65535 之间的整数");
+    alert(i18n("msgErrPort"));
     $('#editPort').focus();
     return;
   }
@@ -249,17 +306,15 @@ function saveServer() {
     await loadAllData(); 
     closeServerEdit();
     renderServerList();
-    showToast("✅ 服务器配置已保存");
-    
-    // 通知后台刷新代理设置
+    showToast(i18n("msgSaved"));
     chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
   });
 }
 
 function deleteServer(id) {
-  if (!confirm("确定删除此服务器配置吗？")) return;
+  if (!confirm(i18n("msgConfirmDelServer"))) return;
   let list = allData.serverList.filter(s => s.id !== id);
-  if (list.length === 0) return alert("至少保留一个服务器");
+  if (list.length === 0) return alert(i18n("msgKeepOne"));
   if (allData.activeServerId === id) allData.activeServerId = list[0].id;
   chrome.storage.local.set({ serverList: list, activeServerId: allData.activeServerId }, async () => {
     await loadAllData();
@@ -267,14 +322,13 @@ function deleteServer(id) {
   });
 }
 
-// --- 规则模块 ---
 function initRuleModule() {
   $('#ruleTypeSelect').onchange = (e) => { currentRuleType = e.target.value; renderRuleList(); };
   $('#ruleSearch').addEventListener('input', () => renderRuleList());
   $('#ruleAddBtn').onclick = addRuleFromInput;
   $('#ruleAddInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addRuleFromInput(); });
   $('#ruleClearBtn').onclick = () => {
-    if (confirm("确定清空当前列表所有规则吗？")) {
+    if (confirm(i18n("msgConfirmClearRules"))) {
       const type = currentRuleType;
       chrome.storage.local.set({ [type]: [] }, async () => { await loadAllData(); renderRuleList(); });
     }
@@ -296,10 +350,10 @@ function initRuleModule() {
           const type = currentRuleType;
           const merged = [...new Set([...(allData[type]||[]), ...data])];
           chrome.storage.local.set({ [type]: merged }, async () => {
-            await loadAllData(); renderRuleList(); showToast(`导入 ${data.length} 条规则`);
+            await loadAllData(); renderRuleList(); showToast(i18n("msgImportCount").replace('%COUNT%', data.length));
           });
-        } else alert("JSON 格式错误");
-      } catch(e) { alert("解析失败"); }
+        } else alert(i18n("msgJsonErr"));
+      } catch(e) { alert(i18n("msgParseErr")); }
     };
     reader.readAsText(file); e.target.value = '';
   };
@@ -309,8 +363,8 @@ function checkConflict(domain) {
   const otherType = currentRuleType === 'userRules' ? 'userWhitelist' : 'userRules';
   const otherList = allData[otherType] || [];
   if (otherList.includes(domain)) {
-    const typeName = otherType === 'userRules' ? '黑名单' : '白名单';
-    return `⚠️ 注意：该域名已存在于【${typeName}】中，可能会导致规则冲突！`;
+    const typeName = otherType === 'userRules' ? i18n("typeBlacklist") : i18n("typeWhitelist");
+    return i18n("msgConflict").replace('%TYPE%', typeName);
   }
   return null;
 }
@@ -332,12 +386,12 @@ function renderRuleList() {
       div.className = 'rule-item';      
       const span = document.createElement('span');
       span.className = 'domain-text';
-      span.title = '双击修改';      
+      span.title = i18n("hintDoubleEdit");      
       span.textContent = domain; 
       const actionDiv = document.createElement('div');
       actionDiv.style.cssText = "display:flex; align-items:center;";      
       actionDiv.innerHTML = `
-        <span class="edit-hint" style="font-size:12px; color:#aaa; margin-right:10px; opacity:0; transition:0.2s;">双击修改</span>
+        <span class="edit-hint" style="font-size:12px; color:#aaa; margin-right:10px; opacity:0; transition:0.2s;">${i18n("hintDoubleEdit")}</span>
         <button class="btn btn-ghost btn-sm btn-del" style="border:none; padding:2px 6px;">✕</button>
       `;
       div.appendChild(span);
@@ -384,7 +438,7 @@ function enableRuleEdit(div, oldDomain) {
       const type = currentRuleType;
       let list = allData[type] || [];
       if (list.includes(newDomain)) { 
-        alert("域名已存在"); 
+        alert(i18n("msgDomainExist")); 
         renderRuleList(); 
       } else {
         const conflictMsg = checkConflict(newDomain);
@@ -402,10 +456,9 @@ function enableRuleEdit(div, oldDomain) {
 
 function addRuleFromInput() {
   const input = $('#ruleAddInput');
-  
   let rawVal = input.value.trim().toLowerCase();
   if (!rawVal) {
-    showToast("⚠️ 请输入域名");
+    showToast(i18n("msgEnterDomain"));
     return;
   }
 
@@ -416,21 +469,20 @@ function addRuleFromInput() {
   } catch (e) {}
 
   val = val.replace(/^\.+|\.+$/g, ''); 
-
   const type = currentRuleType;
   let list = allData[type] || [];
   
   if (!list.includes(val)) {
     const conflictMsg = checkConflict(val);
-    if (conflictMsg && !confirm(conflictMsg + "\n\n是否继续添加？")) return;
+    if (conflictMsg && !confirm(conflictMsg + i18n("msgConfirmConflict"))) return;
     list.push(val);
     chrome.storage.local.set({ [type]: list }, async () => { 
       await loadAllData(); 
       input.value = ''; 
       renderRuleList(); 
-      showToast(`已添加规则: ${val}`); 
+      showToast(i18n("msgRuleAdded").replace('%DOMAIN%', val)); 
     });
-  } else showToast("规则已存在");
+  } else showToast(i18n("msgDomainExist"));
 }
 
 function deleteRule(domain) {
@@ -440,58 +492,38 @@ function deleteRule(domain) {
   chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); });
 }
 
-// --- GFW 模块 ---
 function initGfwModule() {
-  
-  // 1. 监听输入框变化，实时保存 (提升体验)
   $('#gfwUrlInput').addEventListener('input', (e) => {
-    const val = e.target.value.trim();
-    chrome.storage.local.set({ gfwlistUrl: val });
+    chrome.storage.local.set({ gfwlistUrl: e.target.value.trim() });
   });
 
-  // 2. 回显保存的 URL
-  // 如果没有保存过，留空，让 placeholder 提示用户
   if (allData.gfwlistUrl) {
     $('#gfwUrlInput').value = allData.gfwlistUrl;
   }
   
-  // 更新状态显示
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
 
-  // 3. 更新按钮逻辑
   $('#updateGfwBtn').onclick = async () => {
-    // 直接获取输入框的值
     const targetUrl = $('#gfwUrlInput').value.trim();
-    
     if (!targetUrl) {
-      alert("请先填入有效的规则列表 URL (Please enter a valid URL first)");
+      alert(i18n("msgErrUrl"));
       $('#gfwUrlInput').focus();
       return;
     }
-    
-    // 简单的 URL 格式校验
     if (!targetUrl.startsWith('http')) {
-      alert("URL 必须以 http:// 或 https:// 开头");
+      alert(i18n("msgErrHttp"));
       return;
     }
     
     const btn = $('#updateGfwBtn');
     const originalBtnText = btn.textContent;
-    btn.textContent = "⏳ 下载并解析中..."; 
+    btn.textContent = i18n("msgDownloading"); 
     btn.disabled = true;
 
     try {
-      // Fetch user-provided URL
       const response = await fetch(targetUrl);
-      if (!response.ok) {
-        throw new Error(`Download failed with status: ${response.status}`);
-      }
-      
+      if (!response.ok) throw new Error(`Status: ${response.status}`);
       const responseText = await response.text();
-      
-      // --- Safety Parsing Logic (User Input) ---
-      // Attempts to decode Base64 if the user provided a Base64 source.
-      // Fallback to plain text if decoding fails.
       let decodedText = "";
       try {
         const cleanBase64 = responseText.replace(/\s/g, '');
@@ -500,41 +532,32 @@ function initGfwModule() {
         decodedText = responseText;
       }
       
-      // Regex parsing for domains (Strict whitelist approach)
       const lines = decodedText.split(/\r?\n/);
       const validDomains = new Set();
-      
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line || line.startsWith('!') || line.startsWith('[') || line.startsWith('@')) continue;
-        
         let cleanLine = line.replace(/^\|\|/, '').replace(/^\|/, '').replace(/^https?:\/\//, '').replace(/^\.+/, '');
         const domainMatch = cleanLine.match(/^([a-zA-Z0-9\-\.\_\u4e00-\u9fa5]+)/);
-        
         if (domainMatch) {
           const extractedDomain = domainMatch[1];
-          if (extractedDomain.includes('.') && !extractedDomain.includes('*')) {
-            validDomains.add(extractedDomain);
-          }
+          if (extractedDomain.includes('.') && !extractedDomain.includes('*')) validDomains.add(extractedDomain);
         }
       }
       
       const domainArray = Array.from(validDomains); 
       const updateTime = new Date().toLocaleString();
-      
-      if (domainArray.length === 0) {
-        throw new Error("未能解析出有效域名，请检查 URL 是否正确");
-      }
+      if (domainArray.length === 0) throw new Error("No domains parsed");
 
       chrome.storage.local.set({ 
         gfwDomains: domainArray, 
         ruleCount: domainArray.length, 
         lastUpdate: updateTime,
-        gfwlistUrl: targetUrl // 确保保存成功的 URL
+        gfwlistUrl: targetUrl 
       }, async () => {
         await loadAllData(); 
         updateGfwStatus(domainArray.length, updateTime); 
-        showToast(`更新成功: ${domainArray.length} 条规则`);
+        showToast(i18n("msgUpdateSuccess").replace('%COUNT%', domainArray.length));
         btn.textContent = originalBtnText; 
         btn.disabled = false;
         chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
@@ -542,14 +565,13 @@ function initGfwModule() {
       
     } catch(error) { 
       console.error("Update Error:", error);
-      alert("更新失败: " + error.message); 
-      btn.textContent = "❌ 更新失败"; 
+      alert(i18n("msgUpdateFail") + ": " + error.message); 
+      btn.textContent = i18n("msgUpdateFail"); 
       btn.disabled = false; 
       setTimeout(() => { btn.textContent = originalBtnText; }, 2000);
     }
   };
 
-  // --- 【新增】预览折叠逻辑 ---
   const toggleBtn = $('#toggleGfwPreviewBtn');
   const previewArea = $('#gfwPreviewArea');
   const arrow = $('#gfwPreviewArrow');
@@ -557,38 +579,25 @@ function initGfwModule() {
 
   toggleBtn.onclick = () => {
     const isHidden = previewArea.style.display === 'none';
-    
     if (isHidden) {
-      // 展开
       previewArea.style.display = 'block';
       arrow.style.transform = 'rotate(180deg)';
-      
-      // 懒加载数据：只有当数据未填充或更新时间改变时才刷新内容
       if (!textBox.value || allData.lastUpdate !== textBox.dataset.lastVer) {
         const list = allData.gfwDomains || [];
-        if (list.length > 0) {
-          textBox.value = list.join('\n');
-        } else {
-          textBox.value = "（暂无数据，请点击更新按钮）";
-        }
+        textBox.value = list.length > 0 ? list.join('\n') : `(${i18n("phGfwPreview")})`;
         textBox.dataset.lastVer = allData.lastUpdate;
       }
-      
     } else {
-      // 收起
       previewArea.style.display = 'none';
       arrow.style.transform = 'rotate(0deg)';
     }
   };
 }
 
-// 显示详细的更新时间
 function updateGfwStatus(c, t) { 
-    // t 变量就是保存的日期字符串，例如 "2025/12/23 20:30:00"
-    $('#gfwStatus').textContent = c ? `✅ 已缓存 ${c} 条 (更新于 ${t})` : "⚠️ 未加载"; 
+    $('#gfwStatus').textContent = c ? i18n("statusCached").replace('%COUNT%', c).replace('%TIME%', t) : i18n("statusNotLoaded"); 
 }
 
-// --- 同步模块 ---
 function initSyncModule() {
   $('#syncProvider').onchange = updateSyncPanel;
   $('#autoSync').onchange = () => chrome.storage.local.set({ autoSync: $('#autoSync').checked });
@@ -596,32 +605,32 @@ function initSyncModule() {
   $('#davUrl').onchange = saveDav; $('#davUser').onchange = saveDav; $('#davPass').onchange = saveDav;
   
   $('#cloudUploadBtn').onclick = () => {
-    showToast("后台上传中...");
+    showToast(i18n("msgUploading"));
     chrome.runtime.sendMessage({type: 'MANUAL_SYNC_UPLOAD'}, async (res) => {
        if (res && res.success) {
            await loadAllData();
            updateSyncUI(res.time);
-           showToast("上传成功");
-       } else showToast("上传失败: " + (res.error || "未知"));
+           showToast(i18n("msgUploadSuccess"));
+       } else showToast(i18n("msgUploadFail").replace('%ERR%', res.error || "Unknown"));
     });
   };
   
   $('#cloudDownloadBtn').onclick = () => {
-    if(!confirm("确定下载并覆盖本地吗？")) return;
-    showToast("后台下载中...");
+    if(!confirm(i18n("msgConfirmDownload"))) return;
+    showToast(i18n("msgDownloadingBg"));
     chrome.runtime.sendMessage({type: 'MANUAL_SYNC_DOWNLOAD'}, async (res) => {
        if (res && res.success) {
            await loadAllData();
-           renderAll(); // 重新渲染界面，这会包含 GFWList URL 的回显
-           showToast("下载成功，配置已更新");
-       } else showToast("下载失败: " + (res.error || "未知"));
+           renderAll(); 
+           showToast(i18n("msgDownloadSuccess"));
+       } else showToast(i18n("msgDownloadFail").replace('%ERR%', res.error || "Unknown"));
     });
   };
 }
 
 function updateSyncUI(time) {
     const el = $('#syncStatusBadge');
-    el.textContent = "上次: " + time;
+    el.textContent = i18n("msgStatusLast") + time;
     el.className = "status-badge synced";
 }
 
@@ -635,12 +644,25 @@ function saveDav() { chrome.storage.local.set({ davUrl: $('#davUrl').value, davU
 
 function switchSyncPanel() { updateSyncPanel(); } 
 
-// --- 通用 ---
 function initGeneralModule() {
   $('#themeSelect').value = allData.theme || 'system';
   $('#themeSelect').onchange = (e) => { applyTheme(e.target.value); chrome.storage.local.set({ theme: e.target.value }); };
-  $('#resetAppBtn').onclick = () => { if (confirm("⚠️ 危险：清空所有数据？")) chrome.storage.local.clear(() => chrome.runtime.reload()); };
+  
+  // --- 语言选择逻辑 ---
+  const langSelect = document.getElementById('langSelect');
+  if (langSelect) {
+    langSelect.value = allData.appLanguage || 'auto';
+    langSelect.onchange = (e) => {
+      chrome.storage.local.set({ appLanguage: e.target.value }, () => {
+        // 重新加载页面以应用新语言
+        window.location.reload();
+      });
+    };
+  }
+
+  $('#resetAppBtn').onclick = () => { if (confirm(i18n("msgConfirmReset"))) chrome.storage.local.clear(() => chrome.runtime.reload()); };
 }
+
 function applyTheme(theme) {
   const doc = document.documentElement;
   if (theme === 'dark') doc.setAttribute('data-theme', 'dark');

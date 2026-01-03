@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>ProxySwitch 设置中心</title>
+  <title>__MSG_appName__</title>
   <style>
     :root {
       /* --- 核心色调：科技蓝 --- */
@@ -125,13 +125,13 @@
 <body>
 
   <aside class="app-sidebar">
-    <div class="brand"><img src="../assets/icon.png" style="width:32px; height:32px;">  ProxySwitch</div>
+    <div class="brand"><img src="../assets/icon.png" style="width:32px; height:32px;">  __MSG_appName__</div>
     <ul class="menu">
-      <li class="menu-item active" data-target="server"><span>📡</span> 服务器配置</li>
-      <li class="menu-item" data-target="rules"><span>📝</span> 规则管理</li>
-      <li class="menu-item" data-target="gfw"><span>🌏</span> GFWList</li>
-      <li class="menu-item" data-target="sync"><span>☁️</span> 云端备份</li>
-      <li class="menu-item" data-target="about"><span>⚙️</span> 通用设置</li>
+      <li class="menu-item active" data-target="server"><span>📡</span> __MSG_menuServer__</li>
+      <li class="menu-item" data-target="rules"><span>📝</span> __MSG_menuRules__</li>
+      <li class="menu-item" data-target="gfw"><span>🌏</span> __MSG_menuGfw__</li>
+      <li class="menu-item" data-target="sync"><span>☁️</span> __MSG_menuSync__</li>
+      <li class="menu-item" data-target="about"><span>⚙️</span> __MSG_menuGeneral__</li>
     </ul>
     <div class="menu-footer" id="appVersion">Version ...</div>
   </aside>
@@ -142,10 +142,10 @@
       <!-- 服务器配置 -->
       <div id="section-server" class="section active">
         <h2>
-          代理服务器
+          __MSG_titleServer__
           <div style="display:flex; gap:10px;">
-            <button id="testLatencyBtn" class="btn btn-ghost btn-sm">📶 测试延迟</button>
-            <button id="addServerBtn" class="btn btn-primary btn-sm">➕ 新建服务器</button>
+            <button id="testLatencyBtn" class="btn btn-ghost btn-sm">📶 __MSG_btnTestLatency__</button>
+            <button id="addServerBtn" class="btn btn-primary btn-sm">➕ __MSG_btnAddServer__</button>
           </div>
         </h2>
         <div id="latencyResult" style="margin-bottom:15px; padding:10px; border-radius:8px; background:var(--bg-body); display:none; text-align:center;"></div>
@@ -153,98 +153,98 @@
         <div id="serverListContainer"></div>
 
         <div id="serverForm" class="card" style="display:none; margin-top:20px; border:2px dashed var(--primary);">
-          <h3 style="margin-top:0;">编辑服务器</h3>
+          <h3 style="margin-top:0;">__MSG_editServerTitle__</h3>
           <div style="display:grid; grid-template-columns: 2fr 1fr; gap:15px; margin-bottom:15px;">
-            <div><label>备注名称</label><input type="text" id="editName" placeholder="例如: 香港节点 01"></div>
-            <div><label>协议类型</label><select id="editScheme"><option value="HTTP">HTTP</option><option value="HTTPS">HTTPS</option><option value="SOCKS4">SOCKS4</option><option value="SOCKS5">SOCKS5 (推荐)</option></select></div>
+            <div><label>__MSG_lblRemark__</label><input type="text" id="editName" placeholder="__MSG_phName__"></div>
+            <div><label>__MSG_lblProtocol__</label><select id="editScheme"><option value="HTTP">HTTP</option><option value="HTTPS">HTTPS</option><option value="SOCKS4">SOCKS4</option><option value="SOCKS5">SOCKS5</option></select></div>
           </div>
           <div style="display:grid; grid-template-columns: 3fr 1fr; gap:15px; margin-bottom:20px;">
-            <div><label>服务器地址 (IP/域名)</label><input type="text" id="editHost" placeholder="127.0.0.1"></div>
-            <div><label>端口</label><input type="number" id="editPort" placeholder="1080"></div>
+            <div><label>__MSG_lblHost__</label><input type="text" id="editHost" placeholder="__MSG_phHost__"></div>
+            <div><label>__MSG_lblPort__</label><input type="number" id="editPort" placeholder="__MSG_phPort__"></div>
           </div>
           <div style="text-align:right;">
-            <button id="cancelServerItemBtn" class="btn btn-ghost">取消</button>
-            <button id="saveServerItemBtn" class="btn btn-primary">保存配置</button>
+            <button id="cancelServerItemBtn" class="btn btn-ghost">__MSG_btnCancel__</button>
+            <button id="saveServerItemBtn" class="btn btn-primary">__MSG_btnSave__</button>
           </div>
         </div>
       </div>
 
       <!-- 规则管理 -->
       <div id="section-rules" class="section">
-        <h2>规则管理</h2>
+        <h2>__MSG_menuRules__</h2>
         <div class="card">
           <div style="display:flex; margin-bottom:15px;">
              <select id="ruleTypeSelect" style="flex:1; padding:12px; font-weight:bold; border-radius:var(--radius-sm); border-color:var(--border);">
-              <option value="userRules">🚀 黑名单 (强制代理域名)</option>
-              <option value="userWhitelist">🛡️ 白名单 (强制直连域名)</option>
+              <option value="userRules">__MSG_selUserRules__</option>
+              <option value="userWhitelist">__MSG_selUserWhitelist__</option>
             </select>
           </div>
           
           <div class="rule-toolbar">
-            <input type="text" id="ruleSearch" placeholder="🔍 搜索域名..." style="flex:1; background:var(--bg-card);">
-            <input type="text" id="ruleAddInput" placeholder="输入域名回车添加" style="flex:1; background:var(--bg-card);">
-            <button id="ruleAddBtn" class="btn btn-primary btn-sm">添加</button>
+            <input type="text" id="ruleSearch" placeholder="__MSG_phSearchRule__" style="flex:1; background:var(--bg-card);">
+            <input type="text" id="ruleAddInput" placeholder="__MSG_phAddRule__" style="flex:1; background:var(--bg-card);">
+            <button id="ruleAddBtn" class="btn btn-primary btn-sm">__MSG_btnAdd__</button>
           </div>
           
           <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:12px; color:var(--text-sub);">
-            <span>共 <b id="currentRuleCount">0</b> 条规则</span>
-            <span>操作: 双击修改 | 右侧删除</span>
+            <span>__MSG_txtRuleCount__ <b id="currentRuleCount">0</b> __MSG_txtRuleUnit__</span>
+            <span>__MSG_txtRuleHint__</span>
           </div>
 
           <div class="rule-list" id="ruleListContainer"></div>
 
           <div style="display:flex; justify-content:space-between; margin-top:15px;">
             <div style="display:flex; gap:10px;">
-              <button id="ruleExportBtn" class="btn btn-ghost btn-sm">📤 导出</button>
-              <button id="ruleImportBtn" class="btn btn-ghost btn-sm">📥 导入</button>
+              <button id="ruleExportBtn" class="btn btn-ghost btn-sm">__MSG_btnExport__</button>
+              <button id="ruleImportBtn" class="btn btn-ghost btn-sm">__MSG_btnImport__</button>
               <input type="file" id="ruleFile" style="display:none" accept=".json">
             </div>
-            <button id="ruleClearBtn" class="btn btn-ghost btn-sm" style="color:var(--danger)">🗑️ 清空列表</button>
+            <button id="ruleClearBtn" class="btn btn-ghost btn-sm" style="color:var(--danger)">__MSG_btnClearList__</button>
           </div>
         </div>
       </div>
 
       <!-- GFWList -->
       <div id="section-gfw" class="section">
-        <h2>GFWList 智能规则库</h2>
+        <h2>__MSG_titleGfw__</h2>
         <div class="card">
           <div class="info-tip">
-            💡 GFWList 是社区维护的规则列表。由于商店政策限制，本扩展不内置规则源，请手动填入您信任的规则 URL。
+            __MSG_txtGfwTip__
           </div>
           
           <div class="form-group">
-            <label>规则源地址 (URL)</label>
+            <label>__MSG_lblGfwUrl__</label>
             <!-- 移除 select，直接放 input -->
-            <input type="text" id="gfwUrlInput" placeholder="例如: https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt" style="display:block; width:100%;">
+            <input type="text" id="gfwUrlInput" placeholder="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt" style="display:block; width:100%;">
             
             <!-- 推荐引导链接 -->
             <p class="help-text" style="margin-top: 8px; line-height: 1.5;">
-              没有地址？推荐前往 GitHub 官方仓库复制 "Raw" 文件链接：
+              __MSG_txtGfwNoUrl__
               <a href="https://github.com/gfwlist/gfwlist" target="_blank" style="color:var(--primary); text-decoration:underline;">🔗 https://github.com/gfwlist/gfwlist</a>
             </p>
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm); margin-top: 15px;">
             <div>
-              <div style="font-weight:600; font-size:14px;">当前状态</div>
-              <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">未加载</div>
+              <div style="font-weight:600; font-size:14px;">__MSG_lblCurrentStatus__</div>
+              <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">__MSG_statusNotLoaded__</div>
             </div>
-            <button id="updateGfwBtn" class="btn btn-success">🔄 下载并解析规则</button>
+            <button id="updateGfwBtn" class="btn btn-success">__MSG_btnUpdateGfw__</button>
           </div>
 
           <!-- GFWList 预览 -->
           <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
             <div style="display:flex; justify-content: space-between; align-items: center; cursor: pointer;" id="toggleGfwPreviewBtn">
-              <span style="font-size: 13px; font-weight: 600; color: var(--text-sub);">📜 规则列表预览</span>
+              <span style="font-size: 13px; font-weight: 600; color: var(--text-sub);">__MSG_btnGfwPreview__</span>
               <span id="gfwPreviewArrow" style="font-size: 12px; color: var(--text-sub); transition: transform 0.2s;">▼</span>
             </div>
             
             <div id="gfwPreviewArea" style="display: none; margin-top: 12px; animation: fadeIn 0.2s;">
               <textarea id="gfwContentBox" readonly 
                 style="width: 100%; height: 300px; font-family: monospace; font-size: 12px; line-height: 1.5; background: var(--bg-body); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); resize: vertical; padding: 10px; box-sizing: border-box;" 
-                placeholder="暂无规则数据..."></textarea>
+                placeholder="__MSG_phGfwPreview__"></textarea>
               <div class="help-text" style="text-align: right; margin-top: 5px;">
-                ⚠️ 此处为只读预览。如需自定义，请前往“规则管理”添加黑白名单。
+                __MSG_txtGfwPreviewHint__
               </div>
             </div>
           </div>
@@ -253,78 +253,77 @@
 
       <!-- 云端备份 -->
       <div id="section-sync" class="section">
-        <h2>云端备份 <span id="syncStatusBadge" class="server-tag" style="background:#ccc; color:#fff; margin-left:10px;">未备份</span></h2>
+        <h2>__MSG_titleSync__ <span id="syncStatusBadge" class="server-tag" style="background:#ccc; color:#fff; margin-left:10px;">__MSG_statusNotBacked__</span></h2>
         <div class="card">
           <div class="form-group">
-            <label>备份服务提供商</label>
+            <label>__MSG_lblProvider__</label>
             <div style="display:flex; gap:15px;">
               <select id="syncProvider" style="flex:1">
-                <option value="github">GitHub Gist (推荐，稳定免费)</option>
-                <option value="webdav">WebDAV (坚果云/Nextcloud)</option>
+                <option value="github">__MSG_optGithub__</option>
+                <option value="webdav">__MSG_optWebdav__</option>
               </select>
               <div style="display:flex; align-items:center;">
                 <input type="checkbox" id="autoSync" style="width:auto; margin-right:8px;">
-                <span style="font-size:13px;">自动上传 (变更时)</span>
+                <span style="font-size:13px;">__MSG_cbAutoSync__</span>
               </div>
             </div>
           </div>
           
           <div class="info-tip" style="background:var(--bg-body); color:var(--text-sub); border:1px solid var(--border);">
-            ❕ 提示：配置文件将以 <b>纯文本 JSON</b> 格式保存到云端。这方便您查看和编辑，请勿在服务器名称等字段中填写敏感密码。
+            __MSG_txtSyncTip__
           </div>
 
           <div id="panelGithub" style="background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
             <div class="form-group">
-              <label>GitHub Token (Personal Access Token)</label>
+              <label>__MSG_lblToken__</label>
               <input type="password" id="gitToken" placeholder="ghp_xxxxxxxxxxxx...">
-              <p class="help-text">请在 GitHub Settings -> Developer Settings 生成 Token，勾选 'gist' 权限。</p>
+              <p class="help-text">__MSG_txtTokenHint__</p>
             </div>
           </div>
 
           <div id="panelWebdav" style="display:none; background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
-            <div class="form-group"><label>服务器地址</label><input type="text" id="davUrl" placeholder="https://dav.jianguoyun.com/dav/"></div>
+            <div class="form-group"><label>__MSG_lblServerAddr__</label><input type="text" id="davUrl" placeholder="https://dav.jianguoyun.com/dav/"></div>
             <div style="display:flex; gap:10px;">
-              <div style="flex:1"><label>账号</label><input type="text" id="davUser"></div>
-              <div style="flex:1"><label>密码</label><input type="password" id="davPass"></div>
+              <div style="flex:1"><label>__MSG_lblAccount__</label><input type="text" id="davUser"></div>
+              <div style="flex:1"><label>__MSG_lblPassword__</label><input type="password" id="davPass"></div>
             </div>
           </div>
 
           <div style="display:flex; justify-content:center; gap:20px;">
-             <button id="cloudUploadBtn" class="btn btn-primary" style="width:160px; justify-content:center;">⬆️ 上传备份</button>
-             <button id="cloudDownloadBtn" class="btn btn-ghost" style="width:160px; justify-content:center;">⬇️ 下载覆盖</button>
+             <button id="cloudUploadBtn" class="btn btn-primary" style="width:160px; justify-content:center;">__MSG_btnUpload__</button>
+             <button id="cloudDownloadBtn" class="btn btn-ghost" style="width:160px; justify-content:center;">__MSG_btnDownload__</button>
           </div>
         </div>
       </div>
 
       <!-- 通用设置 -->
       <div id="section-about" class="section">
-        <h2>通用设置</h2>
+        <h2>__MSG_titleGeneral__</h2>
 
         <div class="card" style="text-align:center; padding: 40px 24px;">
           <img src="../assets/icon.png" style="width: 64px; height: 64px; margin-bottom: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-          <h3 style="margin: 0 0 8px 0; font-size: 22px; color: var(--text-main);">ProxySwitch</h3>
+          <h3 style="margin: 0 0 8px 0; font-size: 22px; color: var(--text-main);">__MSG_appName__</h3>
           <div style="font-size: 14px; color: var(--text-sub); margin-bottom: 24px;">
-            专业的代理切换与规则管理工具 <span id="aboutVersion">v...</span>
+            __MSG_txtAppDesc__ <span id="aboutVersion">v...</span>
           </div>
           
           <p style="font-size: 14px; line-height: 1.6; color: var(--text-sub); max-width: 600px; margin: 0 auto 32px auto;">
-            ProxySwitch 致力于提供最流畅的浏览器代理管理体验。支持 SOCKS5/HTTP 代理协议、GFWList 自动分流、
-            以及强大的自定义规则与云端备份功能。本项目完全开源，遵循 MIT 协议，不收集任何用户隐私数据。
+            __MSG_txtAppFullDesc__
           </p>
       
           <div style="display: flex; justify-content: center; gap: 16px; margin-bottom: 32px;">
             <a href="https://github.com/DMSQ-creator/ProxySwitch" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
-              <span style="font-size: 18px;">🐙</span> GitHub 仓库
+              <span style="font-size: 18px;">🐙</span> __MSG_btnGithub__
             </a>
             <a href="https://github.com/DMSQ-creator/ProxySwitch/issues" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
-              <span style="font-size: 18px;">🐛</span> 反馈问题
+              <span style="font-size: 18px;">🐛</span> __MSG_btnIssue__
             </a>
           </div>
       
           <div style="border-top: 1px solid var(--border); padding-top: 24px; font-size: 12px; color: var(--text-sub); line-height: 1.5;">
-            <p style="margin: 0;">Copyright © 2025 ProxySwitch Team. All rights reserved.</p>
+            <p style="margin: 0;">__MSG_txtCopyright__</p>
             <p style="margin: 4px 0 0 0;">
-              Made with ❤️ by Developers. 
+              __MSG_txtMadeWith__ 
               License: <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: var(--primary); text-decoration: none;">MIT License</a>
             </p>
           </div>
@@ -332,25 +331,35 @@
 
         <div class="card">
           <div class="form-group">
-            <label>界面主题</label>
+            <label>__MSG_lblTheme__</label>
             <select id="themeSelect">
-              <option value="system">🖥️ 跟随系统设置</option>
-              <option value="light">🌞 浅色模式</option>
-              <option value="dark">🌙 深色模式</option>
+              <option value="system">__MSG_optSystem__</option>
+              <option value="light">__MSG_optLight__</option>
+              <option value="dark">__MSG_optDark__</option>
             </select>
           </div>
         </div>
+        <div class="card form-group">
+          <label>Language / 语言设置</label>
+          <select id="langSelect">
+            <option value="auto">🌐 Auto (Follow System)</option>
+            <option value="zh_CN">🇨🇳 简体中文</option>
+            <option value="en">🇺🇸 English</option>
+            <option value="ru">🇷🇺 Русский (Russian)</option>
+            <option value="es">🇪🇸 Español (Spanish)</option>
+          </select>
+        </div>
         <div class="card" style="border-color:rgba(239, 68, 68, 0.3);">
-          <h3 style="color:var(--danger); margin-top:0;">危险区域</h3>
-          <p class="help-text" style="margin-bottom:15px;">如果您遇到严重错误，可以尝试重置扩展。这将清除所有本地规则和服务器配置。</p>
-          <button id="resetAppBtn" class="btn btn-danger">🔥 重置所有数据</button>
+          <h3 style="color:var(--danger); margin-top:0;">__MSG_titleDanger__</h3>
+          <p class="help-text" style="margin-bottom:15px;">__MSG_txtDangerHint__</p>
+          <button id="resetAppBtn" class="btn btn-danger">__MSG_btnReset__</button>
         </div>
       </div>
 
     </div>
   </main>
 
-  <div id="toast">操作成功</div>
+  <div id="toast">__MSG_msgSaved__</div>
   <script src="../js/options.js"></script>
 </body>
 </html>

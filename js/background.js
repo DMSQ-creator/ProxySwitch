@@ -606,6 +606,7 @@ function setGlobalIcon(key) {
 }
 
 function handleGlobalIconUpdate(mode) {
+  const i18n = chrome.i18n.getMessage;
   // 1. 确定要使用哪个图标 Key
   let iconKey = 'direct'; // 默认 fallback
   
@@ -632,10 +633,10 @@ function handleGlobalIconUpdate(mode) {
         
         // 可选：顺便更新一下鼠标悬停标题
         let title = "ProxySwitch";
-        if (mode === 'fixed_servers') title = "ProxySwitch: 全局代理";
-        else if (mode === 'direct') title = "ProxySwitch: 直接连接";
-        else if (mode === 'system') title = "ProxySwitch: 系统代理";
-        else if (mode === 'pac_script') title = "ProxySwitch: 自动分流";
+        if (mode === 'fixed_servers') title = `ProxySwitch: ${i18n("popTitleGlobal")}`;
+        else if (mode === 'direct') title = `ProxySwitch: ${i18n("popTitleDirect")}`;
+        else if (mode === 'system') title = `ProxySwitch: ${i18n("popTitleSystem")}`;
+        else if (mode === 'pac_script') title = `ProxySwitch: ${i18n("popTitleAuto")}`;
         
         chrome.action.setTitle({ title: title, tabId: tabs[0].id });
       }
@@ -658,6 +659,7 @@ function getSafeHostname(urlStr) {
  */
 function updateTabIcon(tabId, url) {
   if (currentProxyMode !== 'pac_script') return;
+  const i18n = chrome.i18n.getMessage;
 
   // 清理该标签页的旧定时器
   if (pendingIconUpdates.has(tabId)) {
@@ -668,24 +670,24 @@ function updateTabIcon(tabId, url) {
   const hostname = getSafeHostname(url);
   
   let iconKey = 'pac_gray'; 
-  let title = "自动分流 (直连)";
+  let title = i18n("bgTitleAuto");
 
   if (hostname) {
     if (checkSet(hostname, cachedUserWhitelist)) { 
       iconKey = 'pac_blue'; 
-      title = "强制直连"; 
+      title = i18n("bgTitleDirect"); 
     }
     else if (checkSet(hostname, cachedTempRules)) { 
       iconKey = 'pac_org'; 
-      title = "临时规则"; 
+      title = i18n("bgTitleTemp"); 
     }
     else if (checkSet(hostname, cachedUserRules)) { 
       iconKey = 'pac_purp'; 
-      title = "强制代理"; 
+      title = i18n("bgTitleProxy"); 
     }
     else if (checkSet(hostname, cachedGfwDomains)) { 
       iconKey = 'pac_green'; 
-      title = "自动分流 (代理中)"; 
+      title = i18n("bgTitleAutoProxy"); 
     }
   }
 

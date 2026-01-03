@@ -1,4 +1,4 @@
-// js/popup.js - ProxySwitch (Fixed Version)
+// js/popup.js - ProxySwitch (i18n Version Fixed)
 
 const els = {
   serverSelect: document.getElementById('serverSelect'),
@@ -27,62 +27,95 @@ const els = {
 
 let currentTabDomain = '';
 let currentMode = 'direct';
+let customMessages = null;
 
-// 初始化
-loadBaseConfig();
-analyzeCurrentTab();
+// --- 核心：智能 i18n 函数 ---
+const i18n = (key) => {
+  if (customMessages && customMessages[key]) {
+    return customMessages[key].message;
+  }
+  return chrome.i18n.getMessage(key) || "";
+};
+
+// --- 初始化流程 ---
+(async function init() {
+  await loadBaseConfig(); // 这里面会加载语言包
+  localizeHtmlPage();     // 翻译
+  analyzeCurrentTab();    // 逻辑
+})();
+
 
 // 监听配置变化
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
-    loadBaseConfig(); 
-    if (currentTabDomain) checkDomainStatusWrapper();
+    // 这里简单重新加载所有配置
+    loadBaseConfig().then(() => {
+        if (currentTabDomain) checkDomainStatusWrapper();
+    });
   }
 });
 
-function loadBaseConfig() {
-  chrome.storage.local.get(null, (items) => {
-    // 1. 应用主题
-    const theme = items.theme || 'system';
-    const doc = document.documentElement;
-    if (theme === 'dark') doc.setAttribute('data-theme', 'dark');
-    else if (theme === 'light') doc.setAttribute('data-theme', 'light');
-    else doc.removeAttribute('data-theme');
+// --- 核心功能函数 ---
 
-    // 2. 渲染服务器列表
-    const servers = items.serverList || [];
-    const activeId = items.activeServerId;
-    
-    const currentOptions = Array.from(els.serverSelect.options).map(o => o.value + o.text).join('|');
-    const newOptions = servers.map(s => s.id + s.name).join('|');
-    
-    if (currentOptions !== newOptions || els.serverSelect.innerHTML === '') {
-      els.serverSelect.innerHTML = '';
-      if (servers.length === 0) {
-        const opt = document.createElement('option');
-        opt.textContent = "无服务器";
-        els.serverSelect.appendChild(opt);
-        els.serverSelect.disabled = true;
-      } else {
-        els.serverSelect.disabled = false;
-        servers.forEach(s => {
+async function loadBaseConfig() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(null, async (items) => {
+      // 1. 优先加载语言设置
+      const userLang = items.appLanguage || 'auto';
+      if (userLang !== 'auto') {
+        try {
+          const url = chrome.runtime.getURL(`_locales/${userLang}/messages.json`);
+          const res = await fetch(url);
+          customMessages = await res.json();
+        } catch (e) {
+          console.error("Popup failed to load language:", e);
+        }
+      }
+
+      // 2. 应用主题
+      const theme = items.theme || 'system';
+      const doc = document.documentElement;
+      if (theme === 'dark') doc.setAttribute('data-theme', 'dark');
+      else if (theme === 'light') doc.setAttribute('data-theme', 'light');
+      else doc.removeAttribute('data-theme');
+
+      // 3. 渲染服务器列表
+      const servers = items.serverList || [];
+      const activeId = items.activeServerId;
+      
+      const currentOptions = Array.from(els.serverSelect.options).map(o => o.value + o.text).join('|');
+      const newOptions = servers.map(s => s.id + s.name).join('|');
+      
+      if (currentOptions !== newOptions || els.serverSelect.innerHTML === '') {
+        els.serverSelect.innerHTML = '';
+        if (servers.length === 0) {
           const opt = document.createElement('option');
-          opt.value = s.id;
-          opt.textContent = s.name;
-          if (s.id === activeId) opt.selected = true;
+          opt.textContent = i18n("popNoServer");
           els.serverSelect.appendChild(opt);
-        });
+          els.serverSelect.disabled = true;
+        } else {
+          els.serverSelect.disabled = false;
+          servers.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            if (s.id === activeId) opt.selected = true;
+            els.serverSelect.appendChild(opt);
+          });
+        }
+      } else {
+        els.serverSelect.value = activeId;
       }
-    } else {
-      els.serverSelect.value = activeId;
-    }
 
-    // 3. 获取当前代理模式
-    chrome.proxy.settings.get({}, (d) => {
-      if (d && d.value) {
-        currentMode = d.value.mode;
-        updateModeUI(currentMode);
-      }
+      // 4. 获取当前代理模式
+      chrome.proxy.settings.get({}, (d) => {
+        if (d && d.value) {
+          currentMode = d.value.mode;
+          updateModeUI(currentMode);
+        }
+      });
+      
+      resolve();
     });
   });
 }
@@ -130,9 +163,9 @@ function checkDomainStatusWrapper() {
 
 function showInvalidPageUI() {
   currentTabDomain = ""; // 确保变量清空
-  els.domain.textContent = "当前页面无效";
+  els.domain.textContent = i18n("popInvalidPage");
   els.domainArea.style.display = 'flex';
-  els.status.textContent = "无法设置规则";
+  els.status.textContent = i18n("popCannotSet");
   els.statusIcon.textContent = "🚫";
   
   const wrapper = document.querySelector('.domain-card');
@@ -140,12 +173,8 @@ function showInvalidPageUI() {
     wrapper.className = 'domain-card status-fail';
   }
   
-  // 【修复 2】关键：在无效页面（如新标签页），彻底隐藏所有操作按钮
-  // 这样用户就无法点击，也不会报错了
   if (els.addBtnGroup) els.addBtnGroup.style.display = 'none';
   if (els.removeBtn) els.removeBtn.style.display = 'none';
-  // 也可以隐藏整个底部区域
-  // if (els.actionArea) els.actionArea.style.display = 'none';
 }
 
 // 核心状态判断逻辑
@@ -161,7 +190,7 @@ function checkDomainStatus(items) {
   const whitelist = items.userWhitelist || [];
   const gfwRules = items.gfwDomains || [];
   
-  let text = "未匹配 (直连)";
+  let text = i18n("popStatusDirect");
   let icon = "🛡️";
   let isProxy = false;  // 用户规则命中
   let isWhite = false;  // 白名单命中
@@ -169,27 +198,26 @@ function checkDomainStatus(items) {
 
   // 优先级判断：白名单 > 临时 > 用户黑名单 > GFWList
   if (checkList(whitelist, currentTabDomain)) { 
-    text = "强制直连 (白名单)"; 
+    text = i18n("popStatusForceDirect"); 
     icon = "🛡️";
     isWhite = true; 
     statusClass = "status-direct";
   } 
   else if (checkList(tempRules, currentTabDomain)) { 
-    text = "临时代理 (本次)"; 
+    text = i18n("popStatusTemp"); 
     icon = "⏱️";
     isProxy = true; 
     statusClass = "status-temp"; // 橙色
   }
   else if (checkList(userRules, currentTabDomain)) { 
-    text = "强制代理 (黑名单)"; 
+    text = i18n("popStatusForceProxy"); 
     icon = "🚀";
     isProxy = true; 
     statusClass = "status-user"; // 紫色
   }
   else if (checkList(gfwRules, currentTabDomain)) { 
-    text = "匹配 GFWList (自动)"; 
+    text = i18n("popStatusGfw"); 
     icon = "🌏";
-    // GFWList 属于自动规则，不算作用户手动强制，所以 bottom button 依然显示 "加入"
     statusClass = "status-proxy"; // 绿色
   } 
 
@@ -251,7 +279,7 @@ function setMode(mode) {
       if (i.pacScriptData) { 
         config.pacScript = { data: i.pacScriptData }; 
         applySetting(config, mode); 
-      } else alert("PAC 未就绪，请先在设置页更新规则");
+      } else alert(i18n("popErrPac"));
     });
   } else if (mode === 'fixed_servers') {
     chrome.storage.local.get(['serverList', 'activeServerId'], (i) => {
@@ -259,7 +287,7 @@ function setMode(mode) {
       if (s) { 
         config.rules = { singleProxy: { scheme: s.scheme.toLowerCase(), host: s.host, port: parseInt(s.port || 80) } }; 
         applySetting(config, mode); 
-      } else { alert("请先添加服务器"); chrome.runtime.openOptionsPage(); }
+      } else { alert(i18n("popErrAddServer")); chrome.runtime.openOptionsPage(); }
     });
   } else {
     // direct or system
@@ -342,6 +370,50 @@ function removeDomainRule() {
       // 同时刷新 popup 自身的 UI 状态
       checkDomainStatusWrapper();
     });
+  });
+}
+
+// --- 翻译辅助函数 (升级版) ---
+function localizeHtmlPage() {
+  // 1. 处理属性翻译
+  const attributes = ['placeholder', 'title', 'alt', 'value'];
+  const elements = document.querySelectorAll(attributes.map(attr => `[${attr}]`).join(','));
+  elements.forEach(el => {
+    attributes.forEach(attr => {
+      const val = el.getAttribute(attr);
+      if (val && val.includes('__MSG_')) {
+        const newVal = val.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
+        el.setAttribute(attr, newVal);
+      }
+    });
+  });
+
+  // 2. 处理文本节点 (支持 HTML 标签)
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node;
+  const nodesToReplace = [];
+  
+  while(node = walker.nextNode()) {
+    if (node.nodeValue.includes('__MSG_')) {
+      nodesToReplace.push(node);
+    }
+  }
+  
+  nodesToReplace.forEach(node => {
+    const parent = node.parentNode;
+    const translatedText = node.nodeValue.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
+    
+    // 如果翻译内容包含 HTML 标签
+    if (translatedText.includes('<') && translatedText.includes('>')) {
+       const temp = document.createElement('span');
+       temp.innerHTML = translatedText;
+       while (temp.firstChild) {
+         parent.insertBefore(temp.firstChild, node);
+       }
+       parent.removeChild(node);
+    } else {
+       node.nodeValue = translatedText;
+    }
   });
 }
 
