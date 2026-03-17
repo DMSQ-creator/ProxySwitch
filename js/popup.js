@@ -59,7 +59,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function loadBaseConfig() {
   return new Promise(resolve => {
-    chrome.storage.local.get(null, async (items) => {
+    // 🚀 优化：不再加载全量数据(null)，只加载 UI 必需字段
+    chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage'], async (items) => {
       // 1. 优先加载语言设置
       const userLang = items.appLanguage || 'auto';
       if (userLang !== 'auto') {
@@ -156,7 +157,8 @@ function checkDomainStatusWrapper() {
     showInvalidPageUI();
     return;
   }
-  chrome.storage.local.get(null, (items) => {
+  // 🚀 优化：只获取判断规则必需的字段，不再加载全量规则(null)
+  chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains'], (items) => {
     checkDomainStatus(items);
   });
 }
@@ -248,12 +250,23 @@ function checkDomainStatus(items) {
 
 function checkList(list, domain) {
   if (!list || list.length === 0) return false;
+  
+  // 🚀 优化：使用 Set 对象进行 $O(1)$ 查找，提升大数据量匹配性能
+  const listSet = new Set(list.map(rule => {
+    if (!rule) return null;
+    if (rule.startsWith('*.')) return rule.substring(2);
+    if (rule.startsWith('.')) return rule.substring(1);
+    return rule;
+  }).filter(Boolean));
+
   const cleanDomain = domain.replace(/^www\./, '');
-  for (let rule of list) {
-    if (!rule) continue;
-    if (rule.startsWith('*.')) rule = rule.substring(2);
-    else if (rule.startsWith('.')) rule = rule.substring(1);
-    if (domain === rule || cleanDomain === rule || domain.endsWith('.' + rule)) return true;
+  if (listSet.has(domain) || listSet.has(cleanDomain)) return true;
+
+  // 处理后缀匹配
+  let p = domain.indexOf('.');
+  while (p !== -1) {
+    if (listSet.has(domain.substring(p + 1))) return true;
+    p = domain.indexOf('.', p + 1);
   }
   return false;
 }
