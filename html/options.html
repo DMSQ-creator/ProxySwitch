@@ -177,6 +177,7 @@
              <select id="ruleTypeSelect" style="flex:1; padding:12px; font-weight:bold; border-radius:var(--radius-sm); border-color:var(--border);">
               <option value="userRules">__MSG_selUserRules__</option>
               <option value="userWhitelist">__MSG_selUserWhitelist__</option>
+              <option value="tempRules">__MSG_selTempRules__</option>
             </select>
           </div>
           
@@ -214,9 +215,15 @@
           
           <div class="form-group">
             <label>__MSG_lblGfwUrl__</label>
-            <!-- 移除 select，直接放 input -->
             <input type="text" id="gfwUrlInput" placeholder="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt" style="display:block; width:100%;">
-            
+
+            <!-- 快捷镜像源选择 -->
+            <div style="margin-top: 8px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt">GitHub Raw</button>
+              <button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt">jsDelivr CDN</button>
+              <button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://raw.gitmirror.com/gfwlist/gfwlist/master/gfwlist.txt">GitMirror</button>
+            </div>
+
             <!-- 推荐引导链接 -->
             <p class="help-text" style="margin-top: 8px; line-height: 1.5;">
               __MSG_txtGfwNoUrl__

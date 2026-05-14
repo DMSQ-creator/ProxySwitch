@@ -409,11 +409,11 @@ function renderRuleList() {
   if (filtered.length > MAX_DISPLAY_RULES) {
     const more = document.createElement('div');
     more.style.padding = '10px'; more.style.textAlign = 'center'; more.style.color = '#999';
-    more.textContent = `... 已显示前 ${MAX_DISPLAY_RULES} 条，剩余 ${filtered.length - MAX_DISPLAY_RULES} 条请使用搜索查找 ...`;
+    more.textContent = i18n("msgMoreRules").replace('%SHOWN%', MAX_DISPLAY_RULES).replace('%REMAIN%', filtered.length - MAX_DISPLAY_RULES);
     fragment.appendChild(more);
   }
   
-  if (filtered.length === 0) container.innerHTML = '<div style="padding:40px; text-align:center; color:#999">暂无规则</div>';
+  if (filtered.length === 0) container.innerHTML = `<div style="padding:40px; text-align:center; color:#999">${i18n("msgNoRules")}</div>`;
   else container.appendChild(fragment);
 }
 
@@ -442,11 +442,14 @@ function enableRuleEdit(div, oldDomain) {
         renderRuleList(); 
       } else {
         const conflictMsg = checkConflict(newDomain);
-        if (conflictMsg) alert(conflictMsg);
+        if (conflictMsg && !confirm(conflictMsg + i18n("msgConfirmConflict"))) {
+          renderRuleList();
+          return;
+        }
         const idx = list.indexOf(oldDomain);
         if (idx !== -1) {
           list[idx] = newDomain;
-          chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); showToast("已修改"); });
+          chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); showToast(i18n("msgRuleModified")); });
         }
       }
     } else renderRuleList();
@@ -499,8 +502,19 @@ function initGfwModule() {
 
   if (allData.gfwlistUrl) {
     $('#gfwUrlInput').value = allData.gfwlistUrl;
+  } else {
+    $('#gfwUrlInput').value = DEFAULT_GFWLIST_URL;
   }
-  
+
+  // 镜像源快捷按钮
+  $$('.gfw-mirror-btn').forEach(btn => {
+    btn.onclick = () => {
+      const url = btn.dataset.url;
+      $('#gfwUrlInput').value = url;
+      chrome.storage.local.set({ gfwlistUrl: url });
+    };
+  });
+
   updateGfwStatus(allData.ruleCount, allData.lastUpdate);
 
   $('#updateGfwBtn').onclick = async () => {
@@ -549,26 +563,27 @@ function initGfwModule() {
       const updateTime = new Date().toLocaleString();
       if (domainArray.length === 0) throw new Error("No domains parsed");
 
-      chrome.storage.local.set({ 
-        gfwDomains: domainArray, 
-        ruleCount: domainArray.length, 
+      chrome.storage.local.set({
+        gfwDomains: domainArray,
+        ruleCount: domainArray.length,
         lastUpdate: updateTime,
-        gfwlistUrl: targetUrl 
+        gfwlistUrl: targetUrl
       }, async () => {
-        await loadAllData(); 
-        updateGfwStatus(domainArray.length, updateTime); 
+        await loadAllData();
+        updateGfwStatus(domainArray.length, updateTime);
         showToast(i18n("msgUpdateSuccess").replace('%COUNT%', domainArray.length));
-        btn.textContent = originalBtnText; 
-        btn.disabled = false;
         chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
       });
-      
-    } catch(error) { 
+
+    } catch(error) {
       console.error("Update Error:", error);
-      alert(i18n("msgUpdateFail") + ": " + error.message); 
-      btn.textContent = i18n("msgUpdateFail"); 
-      btn.disabled = false; 
+      const isNetworkError = error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || error.message.includes('Status: 404') || error.message.includes('Status: 403');
+      const hint = isNetworkError ? '\n\n' + i18n("msgGfwNetworkHint") : '';
+      alert(i18n("msgUpdateFail") + ": " + error.message + hint);
       setTimeout(() => { btn.textContent = originalBtnText; }, 2000);
+    } finally {
+      btn.textContent = originalBtnText;
+      btn.disabled = false;
     }
   };
 

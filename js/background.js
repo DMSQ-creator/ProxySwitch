@@ -143,7 +143,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 // ===== 消息监听 =====
 chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
   if (m.type === 'REFRESH_PROXY') {
-    updateCacheAndApply();
+    refreshCacheAndIcon();
   } else if (m.type === 'UPDATE_ICON') {
     updateIconForActiveTab();
   } else if (m.type === 'MANUAL_SYNC_UPLOAD') {
@@ -180,6 +180,95 @@ function normalizeSet(list) {
     }
     return prefix + raw;
   }).filter(Boolean));
+}
+
+/**
+ * Lightweight refresh: only update in-memory cache and regenerate PAC script,
+ * without re-applying proxy mode. Used for REFRESH_PROXY messages from popup
+ * to avoid background overwriting popup's just-set proxy config.
+ */
+function refreshCacheAndIcon() {
+  chrome.storage.local.get(null, (items) => {
+    cachedUserRules = normalizeSet(items.userRules);
+    cachedUserWhitelist = normalizeSet(items.userWhitelist);
+    cachedGfwDomains = normalizeSet(items.gfwDomains);
+    cachedTempRules = normalizeSet(items.tempRules);
+
+    const servers = items.serverList || [];
+    const activeServer = servers.find(s => s.id === items.activeServerId) || servers[0];
+    let pacScriptStr = "";
+    if (activeServer) {
+      let host = (activeServer.host || "127.0.0.1").trim();
+      if (/[^\x00-\x7F]/.test(host)) {
+        try { host = new URL('http://'+host).hostname; }
+        catch(e){ host="127.0.0.1"; }
+      }
+      let port = parseInt(activeServer.port, 10);
+      if (isNaN(port) || port < 1 || port > 65535) port = 1080;
+      const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
+      let pacProxyType = "SOCKS5";
+      if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";
+      else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
+      const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
+      const rawUserRules = Array.from(cachedUserRules || []);
+      const wildcardRules = rawUserRules.filter(r => r.includes('*'));
+      const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
+      const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
+      pacScriptStr = `
+        var Proxy = "${proxyStr}";
+        var Direct = "DIRECT";
+        var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
+        var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
+        var wList = ${JSON.stringify(wildcardRules)};
+        var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
+        function FindProxyForURL(url, host) {
+          if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
+          if (ipRegex.test(host)) {
+            if (isInNet(host, "10.0.0.0", "255.0.0.0") ||
+                isInNet(host, "172.16.0.0", "255.240.0.0") ||
+                isInNet(host, "192.168.0.0", "255.255.0.0") ||
+                isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
+          }
+          host = host.toLowerCase();
+          if (check(host, dMap)) return Direct;
+          for (var i = 0; i < wList.length; i++) {
+            if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
+          }
+          if (check(host, pMap)) return Proxy;
+          return Direct;
+        }
+        function check(h, m) {
+          if (m[h]) return true;
+          var p = h.indexOf('.');
+          while (p !== -1) {
+            if (m[h.substring(p + 1)]) return true;
+            p = h.indexOf('.', p + 1);
+          }
+          return false;
+        }
+      `;
+    }
+
+    const newPacHash = simpleHash(pacScriptStr);
+    if (newPacHash !== lastPacHash) {
+      isApplyingProxy = true;
+      pacUpdateVersion++;
+      chrome.storage.local.set({
+        pacScriptData: pacScriptStr,
+        pacVersion: pacUpdateVersion,
+        pacHash: newPacHash
+      }, () => {
+        lastPacHash = newPacHash;
+        isApplyingProxy = false;
+      });
+    }
+
+    chrome.proxy.settings.get({}, (d) => {
+      const mode = (d && d.value) ? d.value.mode : 'direct';
+      currentProxyMode = mode;
+      handleGlobalIconUpdate(mode);
+    });
+  });
 }
 
 function updateCacheAndApply(specificTabId, specificUrl) {
@@ -327,13 +416,37 @@ function applyProxySettings(items, callback) {
       currentProxyMode = mode;
       handleGlobalIconUpdate(mode);
 
-      // 只有当前是自动模式，且 PAC 有内容时，才重新设置代理
       if (mode === 'pac_script' && pacScriptStr) {
         chrome.proxy.settings.set({
           value: { mode: "pac_script", pacScript: { data: pacScriptStr } },
           scope: 'regular'
         }, () => {
-          console.log('[ProxySwitch] Proxy settings applied successfully');
+          if (chrome.runtime.lastError) {
+            console.error('[ProxySwitch] Proxy apply failed:', chrome.runtime.lastError.message);
+          } else {
+            console.log('[ProxySwitch] Proxy settings applied successfully');
+          }
+          if (cb) cb();
+        });
+      } else if (mode === 'fixed_servers' && activeServer) {
+        chrome.proxy.settings.set({
+          value: {
+            mode: "fixed_servers",
+            rules: {
+              singleProxy: {
+                scheme: (activeServer.scheme || 'SOCKS5').toLowerCase(),
+                host: (activeServer.host || '127.0.0.1').trim(),
+                port: parseInt(activeServer.port, 10) || 1080
+              }
+            }
+          },
+          scope: 'regular'
+        }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('[ProxySwitch] Proxy apply failed:', chrome.runtime.lastError.message);
+          } else {
+            console.log('[ProxySwitch] Fixed proxy settings applied successfully');
+          }
           if (cb) cb();
         });
       } else {
@@ -405,16 +518,17 @@ async function performCloudUpload(){
     const backupData = {
       userRules: items.userRules || [],
       userWhitelist: items.userWhitelist || [],
+      tempRules: items.tempRules || [],
       serverList: items.serverList || [],
       activeServerId: items.activeServerId || '',
       gfwlistUrl: items.gfwlistUrl || '',
       theme: items.theme || 'system',
+      appLanguage: items.appLanguage || 'auto',
       autoSync: items.autoSync || false,
       syncProvider: items.syncProvider || 'github',
-      
-      // 元数据
+
       updatedAt: new Date().toISOString(),
-      backupVer: 3 // 标记版本，方便未来维护
+      backupVer: 4
     };
     
     // 3. 转换为格式化的 JSON 字符串 (方便用户阅读)
@@ -488,15 +602,30 @@ async function performCloudDownload(){
     // 2. 验证与应用 (不兼容旧版，直接读取字段)
     if (remoteData && typeof remoteData === 'object') {
       
-      // 清理敏感字段，防止覆盖本地认证信息
-      delete remoteData.gitToken; 
-      delete remoteData.davUrl; 
-      delete remoteData.davUser; 
-      delete remoteData.davPass; 
-      delete remoteData.gfwDomains; // 规则列表体积大且常变，不建议同步，让用户重新下载
-      
-      // 应用到本地
-      await chrome.storage.local.set(remoteData);
+      // 清理敏感字段和不应同步的字段
+      delete remoteData.gitToken;
+      delete remoteData.davUrl;
+      delete remoteData.davUser;
+      delete remoteData.davPass;
+      delete remoteData.gfwDomains;
+      delete remoteData.pacScriptData;
+      delete remoteData.pacVersion;
+      delete remoteData.pacHash;
+      delete remoteData.lastSyncTime;
+      delete remoteData.ruleCount;
+      delete remoteData.lastUpdate;
+      delete remoteData.updatedAt;
+      delete remoteData.backupVer;
+
+      // Skip empty arrays and null values to avoid overwriting local data
+      const safeData = {};
+      for (const [key, value] of Object.entries(remoteData)) {
+        if (Array.isArray(value) && value.length === 0) continue;
+        if (value === undefined || value === null) continue;
+        safeData[key] = value;
+      }
+
+      await chrome.storage.local.set(safeData);
       
       const timeDisplay = new Date().toLocaleString();
       await chrome.storage.local.set({ lastSyncTime: timeDisplay });
