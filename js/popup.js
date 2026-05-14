@@ -250,24 +250,32 @@ function checkDomainStatus(items) {
 
 function checkList(list, domain) {
   if (!list || list.length === 0) return false;
-  
-  // 🚀 优化：使用 Set 对象进行 $O(1)$ 查找，提升大数据量匹配性能
-  const listSet = new Set(list.map(rule => {
-    if (!rule) return null;
-    if (rule.startsWith('*.')) return rule.substring(2);
-    if (rule.startsWith('.')) return rule.substring(1);
-    return rule;
-  }).filter(Boolean));
+
+  const listSet = new Set(list.filter(Boolean));
+
+  const tryMatch = (d) => {
+    if (listSet.has(d)) return true;
+    if (listSet.has('.' + d)) return true;
+    if (listSet.has('*.' + d)) return true;
+    return false;
+  };
 
   const cleanDomain = domain.replace(/^www\./, '');
-  if (listSet.has(domain) || listSet.has(cleanDomain)) return true;
+  if (tryMatch(domain) || tryMatch(cleanDomain)) return true;
 
-  // 处理后缀匹配
   let p = domain.indexOf('.');
   while (p !== -1) {
-    if (listSet.has(domain.substring(p + 1))) return true;
+    if (tryMatch(domain.substring(p + 1))) return true;
     p = domain.indexOf('.', p + 1);
   }
+
+  for (const rule of listSet) {
+    if (rule.startsWith('*.')) {
+      const suffix = rule.substring(2);
+      if (domain === suffix || domain.endsWith('.' + suffix)) return true;
+    }
+  }
+
   return false;
 }
 

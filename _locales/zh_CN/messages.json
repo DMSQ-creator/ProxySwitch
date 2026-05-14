@@ -21,6 +21,7 @@
   "phPort": { "message": "1080" },
   "selUserRules": { "message": "🚀 黑名单 (强制代理域名)" },
   "selUserWhitelist": { "message": "🛡️ 白名单 (强制直连域名)" },
+  "selTempRules": { "message": "⏱️ 临时规则 (浏览器重启后失效)" },
   "phSearchRule": { "message": "🔍 搜索域名..." },
   "phAddRule": { "message": "输入域名回车添加" },
   "btnAdd": { "message": "添加" },
@@ -125,6 +126,7 @@
   "popTitleGlobal": { "message": "全局代理" },
   "popTitleDirect": { "message": "直接连接" },
   "popTitleSystem": { "message": "系统代理" },
+  "popModeLabel": { "message": "代理模式" },
   "popBtnAdd": { "message": "加入代理列表" },
   "popBtnTemp": { "message": "临时" },
   "popBtnTempHint": { "message": "浏览器重启后失效" },
@@ -136,5 +138,9 @@
   "bgTitleAutoProxy": { "message": "自动分流 (代理中)" },
   "bgTitleDirect": { "message": "强制直连" },
   "bgTitleTemp": { "message": "临时规则" },
-  "bgTitleProxy": { "message": "强制代理" }
+  "bgTitleProxy": { "message": "强制代理" },
+  "msgRuleModified": { "message": "已修改" },
+  "msgMoreRules": { "message": "... 已显示前 %SHOWN% 条，剩余 %REMAIN% 条请使用搜索查找 ..." },
+  "msgNoRules": { "message": "暂无规则" },
+  "msgGfwNetworkHint": { "message": "可能是网络问题，请尝试切换上方的镜像源（jsDelivr CDN / GitMirror）。" }
 }

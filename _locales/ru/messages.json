@@ -21,6 +21,7 @@
   "phPort": { "message": "1080" },
   "selUserRules": { "message": "🚀 Черный список (Принуд. прокси)" },
   "selUserWhitelist": { "message": "🛡️ Белый список (Прямое соед.)" },
+  "selTempRules": { "message": "⏱️ Врем. правила (Сброс при перезапуске)" },
   "phSearchRule": { "message": "🔍 Поиск домена..." },
   "phAddRule": { "message": "Введите домен для добавления" },
   "btnAdd": { "message": "Добавить" },
@@ -125,6 +126,7 @@
   "popTitleGlobal": { "message": "Глобальный прокси" },
   "popTitleDirect": { "message": "Прямое соединение" },
   "popTitleSystem": { "message": "Системный прокси" },
+  "popModeLabel": { "message": "Режим прокси" },
   "popBtnAdd": { "message": "В список прокси" },
   "popBtnTemp": { "message": "Врем." },
   "popBtnTempHint": { "message": "Сброс после перезапуска" },
@@ -136,5 +138,9 @@
   "bgTitleAutoProxy": { "message": "Авто (Прокси)" },
   "bgTitleDirect": { "message": "Принуд. Прямое" },
   "bgTitleTemp": { "message": "Врем. правило" },
-  "bgTitleProxy": { "message": "Принуд. Прокси" }
+  "bgTitleProxy": { "message": "Принуд. Прокси" },
+  "msgRuleModified": { "message": "Правило изменено" },
+  "msgMoreRules": { "message": "... Показано первых %SHOWN%, осталось %REMAIN% — используйте поиск ..." },
+  "msgNoRules": { "message": "Нет правил" },
+  "msgGfwNetworkHint": { "message": "Возможна проблема с сетью. Попробуйте переключиться на зеркало (jsDelivr CDN / GitMirror) выше." }
 }

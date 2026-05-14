@@ -21,6 +21,7 @@
   "phPort": { "message": "1080" },
   "selUserRules": { "message": "🚀 Blacklist (Force Proxy)" },
   "selUserWhitelist": { "message": "🛡️ Whitelist (Force Direct)" },
+  "selTempRules": { "message": "⏱️ Temp Rules (Session Only)" },
   "phSearchRule": { "message": "🔍 Search domain..." },
   "phAddRule": { "message": "Enter domain to add" },
   "btnAdd": { "message": "Add" },
@@ -125,6 +126,7 @@
   "popTitleGlobal": { "message": "Global Proxy" },
   "popTitleDirect": { "message": "Direct Connect" },
   "popTitleSystem": { "message": "System Proxy" },
+  "popModeLabel": { "message": "Proxy Mode" },
   "popBtnAdd": { "message": "Add to Proxy List" },
   "popBtnTemp": { "message": "Temp" },
   "popBtnTempHint": { "message": "Reset after restart" },
@@ -136,5 +138,9 @@
   "bgTitleAutoProxy": { "message": "Auto (Proxy)" },
   "bgTitleDirect": { "message": "Force Direct" },
   "bgTitleTemp": { "message": "Temp Rule" },
-  "bgTitleProxy": { "message": "Force Proxy" }
+  "bgTitleProxy": { "message": "Force Proxy" },
+  "msgRuleModified": { "message": "Rule Modified" },
+  "msgMoreRules": { "message": "... Showing first %SHOWN%, %REMAIN% more - use search to find ..." },
+  "msgNoRules": { "message": "No Rules" },
+  "msgGfwNetworkHint": { "message": "This may be a network issue. Try switching to a mirror source (jsDelivr CDN / GitMirror) above." }
 }

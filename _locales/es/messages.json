@@ -21,6 +21,7 @@
   "phPort": { "message": "1080" },
   "selUserRules": { "message": "🚀 Lista Negra (Forzar Proxy)" },
   "selUserWhitelist": { "message": "🛡️ Lista Blanca (Directo)" },
+  "selTempRules": { "message": "⏱️ Reglas Temporales (Sesión)" },
   "phSearchRule": { "message": "🔍 Buscar dominio..." },
   "phAddRule": { "message": "Ingresa dominio para añadir" },
   "btnAdd": { "message": "Añadir" },
@@ -125,6 +126,7 @@
   "popTitleGlobal": { "message": "Proxy Global" },
   "popTitleDirect": { "message": "Conexión Directa" },
   "popTitleSystem": { "message": "Proxy del Sistema" },
+  "popModeLabel": { "message": "Modo Proxy" },
   "popBtnAdd": { "message": "Añadir a Lista Proxy" },
   "popBtnTemp": { "message": "Temp" },
   "popBtnTempHint": { "message": "Reinicio al reiniciar" },
@@ -136,5 +138,9 @@
   "bgTitleAutoProxy": { "message": "Auto (Proxy)" },
   "bgTitleDirect": { "message": "Forzar Directo" },
   "bgTitleTemp": { "message": "Regla Temp" },
-  "bgTitleProxy": { "message": "Forzar Proxy" }
+  "bgTitleProxy": { "message": "Forzar Proxy" },
+  "msgRuleModified": { "message": "Regla Modificada" },
+  "msgMoreRules": { "message": "... Mostrando primeras %SHOWN%, quedan %REMAIN% - usa búsqueda ..." },
+  "msgNoRules": { "message": "Sin Reglas" },
+  "msgGfwNetworkHint": { "message": "Puede ser un problema de red. Intenta cambiar a un mirror (jsDelivr CDN / GitMirror) arriba." }
 }
