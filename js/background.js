@@ -1,4 +1,5 @@
 // js/background.js - ProxySwitch
+importScripts('logger.js');
 
 // ===== 全局变量 =====
 let cachedUserRules = new Set();
@@ -68,6 +69,88 @@ function debounce(func, wait) {
 }
 
 const debouncedUpdate = debounce(updateCacheAndApply, 500);
+
+function resolveActiveServer(items) {
+  const servers = items.serverList || [];
+  return servers.find(s => s.id === items.activeServerId) || servers[0] || null;
+}
+
+function buildPacScriptString(activeServer) {
+  if (!activeServer) return '';
+  let host = (activeServer.host || '127.0.0.1').trim();
+  if (/[^\x00-\x7F]/.test(host)) {
+    try { host = new URL('http://' + host).hostname; }
+    catch (e) { host = '127.0.0.1'; }
+  }
+  let port = parseInt(activeServer.port, 10);
+  if (isNaN(port) || port < 1 || port > 65535) port = 1080;
+  const scheme = (activeServer.scheme || 'SOCKS5').toUpperCase();
+  let pacProxyType = 'SOCKS5';
+  if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = 'PROXY';
+  else if (scheme === 'SOCKS4') pacProxyType = 'SOCKS';
+  const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
+  const rawUserRules = Array.from(cachedUserRules || []);
+  const wildcardRules = rawUserRules.filter(r => r.includes('*'));
+  const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
+  const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
+  return `
+      var Proxy = "${proxyStr}";
+      var Direct = "DIRECT";
+      var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d => [d, 1])))};
+      var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d => [d, 1])))};
+      var wList = ${JSON.stringify(wildcardRules)};
+      var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
+      function FindProxyForURL(url, host) {
+        if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
+        if (ipRegex.test(host)) {
+          if (isInNet(host, "10.0.0.0", "255.0.0.0") ||
+              isInNet(host, "172.16.0.0", "255.240.0.0") ||
+              isInNet(host, "192.168.0.0", "255.255.0.0") ||
+              isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
+        }
+        host = host.toLowerCase();
+        if (check(host, dMap)) return Direct;
+        for (var i = 0; i < wList.length; i++) {
+          if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
+        }
+        if (check(host, pMap)) return Proxy;
+        return Direct;
+      }
+      function check(h, m) {
+        if (m[h]) return true;
+        var p = h.indexOf('.');
+        while (p !== -1) {
+          if (m[h.substring(p + 1)]) return true;
+          p = h.indexOf('.', p + 1);
+        }
+        return false;
+      }
+    `;
+}
+
+function persistPacScriptIfNeeded(items, pacScriptStr, callback) {
+  if (!pacScriptStr) {
+    if (callback) callback();
+    return;
+  }
+  const newPacHash = simpleHash(pacScriptStr);
+  const needsPersist = newPacHash !== lastPacHash || !items.pacScriptData;
+  if (!needsPersist) {
+    if (callback) callback();
+    return;
+  }
+  isApplyingProxy = true;
+  pacUpdateVersion++;
+  chrome.storage.local.set({
+    pacScriptData: pacScriptStr,
+    pacVersion: pacUpdateVersion,
+    pacHash: newPacHash,
+  }, () => {
+    lastPacHash = newPacHash;
+    isApplyingProxy = false;
+    if (callback) callback();
+  });
+}
 
 // ===== 初始化与监听 =====
 chrome.runtime.onInstalled.addListener(async (d) => {
@@ -144,17 +227,42 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
   if (m.type === 'REFRESH_PROXY') {
     refreshCacheAndIcon();
+  } else if (m.type === 'ENSURE_PAC') {
+    chrome.storage.local.get(null, (items) => {
+      cachedUserRules = normalizeSet(items.userRules);
+      cachedUserWhitelist = normalizeSet(items.userWhitelist);
+      cachedGfwDomains = normalizeSet(items.gfwDomains);
+      cachedTempRules = normalizeSet(items.tempRules);
+      if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
+
+      const activeServer = resolveActiveServer(items);
+      const pacScriptStr = buildPacScriptString(activeServer);
+      if (!pacScriptStr) {
+        sendResponse({ success: false, error: 'no_server' });
+        return;
+      }
+      persistPacScriptIfNeeded(items, pacScriptStr, () => {
+        sendResponse({ success: true, pacScriptData: pacScriptStr });
+      });
+    });
+    return true;
   } else if (m.type === 'UPDATE_ICON') {
     updateIconForActiveTab();
   } else if (m.type === 'MANUAL_SYNC_UPLOAD') {
     performCloudUpload()
       .then(t => sendResponse({success:true, time:t}))
-      .catch(e => sendResponse({success:false, error:e.message}));
+      .catch(e => {
+        PSL.error('background', 'Manual sync upload failed', e.message);
+        sendResponse({success:false, error:e.message});
+      });
     return true; 
   } else if (m.type === 'MANUAL_SYNC_DOWNLOAD') {
     performCloudDownload()
       .then(t => sendResponse({success:true, time:t}))
-      .catch(e => sendResponse({success:false, error:e.message}));
+      .catch(e => {
+        PSL.error('background', 'Manual sync download failed', e.message);
+        sendResponse({success:false, error:e.message});
+      });
     return true; 
   }
 });
@@ -193,80 +301,15 @@ function refreshCacheAndIcon() {
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
     cachedTempRules = normalizeSet(items.tempRules);
+    if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
 
-    const servers = items.serverList || [];
-    const activeServer = servers.find(s => s.id === items.activeServerId) || servers[0];
-    let pacScriptStr = "";
-    if (activeServer) {
-      let host = (activeServer.host || "127.0.0.1").trim();
-      if (/[^\x00-\x7F]/.test(host)) {
-        try { host = new URL('http://'+host).hostname; }
-        catch(e){ host="127.0.0.1"; }
-      }
-      let port = parseInt(activeServer.port, 10);
-      if (isNaN(port) || port < 1 || port > 65535) port = 1080;
-      const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
-      let pacProxyType = "SOCKS5";
-      if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";
-      else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
-      const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
-      const rawUserRules = Array.from(cachedUserRules || []);
-      const wildcardRules = rawUserRules.filter(r => r.includes('*'));
-      const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
-      const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
-      pacScriptStr = `
-        var Proxy = "${proxyStr}";
-        var Direct = "DIRECT";
-        var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
-        var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
-        var wList = ${JSON.stringify(wildcardRules)};
-        var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
-        function FindProxyForURL(url, host) {
-          if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
-          if (ipRegex.test(host)) {
-            if (isInNet(host, "10.0.0.0", "255.0.0.0") ||
-                isInNet(host, "172.16.0.0", "255.240.0.0") ||
-                isInNet(host, "192.168.0.0", "255.255.0.0") ||
-                isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
-          }
-          host = host.toLowerCase();
-          if (check(host, dMap)) return Direct;
-          for (var i = 0; i < wList.length; i++) {
-            if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
-          }
-          if (check(host, pMap)) return Proxy;
-          return Direct;
-        }
-        function check(h, m) {
-          if (m[h]) return true;
-          var p = h.indexOf('.');
-          while (p !== -1) {
-            if (m[h.substring(p + 1)]) return true;
-            p = h.indexOf('.', p + 1);
-          }
-          return false;
-        }
-      `;
-    }
-
-    const newPacHash = simpleHash(pacScriptStr);
-    if (newPacHash !== lastPacHash) {
-      isApplyingProxy = true;
-      pacUpdateVersion++;
-      chrome.storage.local.set({
-        pacScriptData: pacScriptStr,
-        pacVersion: pacUpdateVersion,
-        pacHash: newPacHash
-      }, () => {
-        lastPacHash = newPacHash;
-        isApplyingProxy = false;
+    const pacScriptStr = buildPacScriptString(resolveActiveServer(items));
+    persistPacScriptIfNeeded(items, pacScriptStr, () => {
+      chrome.proxy.settings.get({}, (d) => {
+        const mode = (d && d.value) ? d.value.mode : 'direct';
+        currentProxyMode = mode;
+        handleGlobalIconUpdate(mode);
       });
-    }
-
-    chrome.proxy.settings.get({}, (d) => {
-      const mode = (d && d.value) ? d.value.mode : 'direct';
-      currentProxyMode = mode;
-      handleGlobalIconUpdate(mode);
     });
   });
 }
@@ -312,104 +355,13 @@ function updateCacheAndApply(specificTabId, specificUrl) {
 }
 
 function applyProxySettings(items, callback) {
-  const servers = items.serverList || [];
-  const activeServer = servers.find(s => s.id === items.activeServerId) || servers[0];
-  
-  // 1. 生成 PAC 脚本内容
-  let pacScriptStr = "";
-  if (activeServer) {
-    let host = (activeServer.host || "127.0.0.1").trim();
-    if (/[^\x00-\x7F]/.test(host)) { 
-      try { host = new URL('http://'+host).hostname; } 
-      catch(e){ host="127.0.0.1"; } 
-    }
-    
-    let port = parseInt(activeServer.port, 10);
-    if (isNaN(port) || port < 1 || port > 65535) port = 1080; 
-    
-    const scheme = (activeServer.scheme || "SOCKS5").toUpperCase();
-    let pacProxyType = "SOCKS5"; 
-    if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = "PROXY";  
-    else if (scheme === 'SOCKS4') pacProxyType = "SOCKS";
-    
-    const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
-    const rawUserRules = Array.from(cachedUserRules || []);
-    const wildcardRules = rawUserRules.filter(r => r.includes('*'));
-    const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
-    const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
+  const activeServer = resolveActiveServer(items);
+  const pacScriptStr = buildPacScriptString(activeServer);
 
-    pacScriptStr = `
-      var Proxy = "${proxyStr}";
-      var Direct = "DIRECT";
-      var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d=>[d,1])))};
-      var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d=>[d,1])))};
-      var wList = ${JSON.stringify(wildcardRules)};
-      var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
-      function FindProxyForURL(url, host) {
-        if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
-        if (ipRegex.test(host)) {
-          if (isInNet(host, "10.0.0.0", "255.0.0.0") || 
-              isInNet(host, "172.16.0.0", "255.240.0.0") || 
-              isInNet(host, "192.168.0.0", "255.255.0.0") || 
-              isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
-        }
-        host = host.toLowerCase();
-        if (check(host, dMap)) return Direct;
-        for (var i = 0; i < wList.length; i++) {
-          if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
-        }
-        if (check(host, pMap)) return Proxy;
-        return Direct;
-      }
-      function check(h, m) {
-        if (m[h]) return true;
-        var p = h.indexOf('.');
-        while (p !== -1) {
-          if (m[h.substring(p + 1)]) return true;
-          p = h.indexOf('.', p + 1);
-        }
-        return false;
-      }
-    `;
-  }
-
-  // 🔥 修复 Bug #1.5: 计算新 PAC 的哈希值
-  const newPacHash = simpleHash(pacScriptStr);
-  
-  // 🔥 修复 Bug #1.6: 如果内容完全相同，跳过 storage 写入
-  if (newPacHash === lastPacHash) {
-    console.log('[ProxySwitch] PAC content unchanged, skipping storage write');
-    // 仍然需要应用代理设置（可能是模式切换）
+  persistPacScriptIfNeeded(items, pacScriptStr, () => {
     doApplyProxyConfig(callback);
-    return;
-  }
-  
-  console.log('[ProxySwitch] PAC content changed, updating storage');
-  console.log('  Old hash:', lastPacHash);
-  console.log('  New hash:', newPacHash);
-  
-  // 🔥 修复 Bug #1.7: 设置标志位，防止触发递归
-  isApplyingProxy = true;
-  pacUpdateVersion++;
-  
-  // 🔥 修复 Bug #1.8: 存储时附带版本号和哈希值
-  chrome.storage.local.set({ 
-    pacScriptData: pacScriptStr,
-    pacVersion: pacUpdateVersion,
-    pacHash: newPacHash
-  }, () => {
-    // 更新内存中的哈希值
-    lastPacHash = newPacHash;
-    
-    // 应用代理配置
-    doApplyProxyConfig(() => {
-      // 🔥 修复 Bug #1.9: 操作完成后重置标志位
-      isApplyingProxy = false;
-      if (callback) callback();
-    });
   });
-  
-  // 辅助函数：实际应用代理配置
+
   function doApplyProxyConfig(cb) {
     chrome.proxy.settings.get({}, (d) => {
       const mode = (d && d.value) ? d.value.mode : 'direct';
@@ -422,9 +374,9 @@ function applyProxySettings(items, callback) {
           scope: 'regular'
         }, () => {
           if (chrome.runtime.lastError) {
-            console.error('[ProxySwitch] Proxy apply failed:', chrome.runtime.lastError.message);
+            PSL.error('background', 'PAC proxy apply failed', chrome.runtime.lastError.message);
           } else {
-            console.log('[ProxySwitch] Proxy settings applied successfully');
+            PSL.info('background', 'PAC proxy settings applied');
           }
           if (cb) cb();
         });
@@ -443,9 +395,9 @@ function applyProxySettings(items, callback) {
           scope: 'regular'
         }, () => {
           if (chrome.runtime.lastError) {
-            console.error('[ProxySwitch] Proxy apply failed:', chrome.runtime.lastError.message);
+            PSL.error('background', 'Fixed proxy apply failed', chrome.runtime.lastError.message);
           } else {
-            console.log('[ProxySwitch] Fixed proxy settings applied successfully');
+            PSL.info('background', 'Fixed proxy settings applied');
           }
           if (cb) cb();
         });
@@ -473,7 +425,9 @@ async function bgWebdavUpload(config, jsonString){
       method: 'MKCOL', 
       headers: { 'Authorization': auth }
     }); 
-  } catch(e){}
+  } catch (e) {
+    PSL.warn('background', 'WebDAV MKCOL skipped', e.message);
+  }
   
   // 2. 上传文件 (直接 PUT JSON 字符串)
   const res = await fetch(baseUrl + DAV_DIR_NAME + '/' + CONFIG_FILE_NAME, {
@@ -547,7 +501,9 @@ async function performCloudUpload(){
         const gists = await ghFetch('https://api.github.com/gists', 'GET', items.gitToken);
         const exist = gists.find(x => x.files && x.files[CONFIG_FILE_NAME]);
         if (exist) gistId = exist.id;
-      } catch(e) {}
+      } catch (e) {
+        PSL.warn('background', 'Gist lookup failed, will create new', e.message);
+      }
       
       const body = {
         description: "ProxySwitch Configuration Backup", // 移除 Obfuscated 字样
@@ -657,7 +613,7 @@ function triggerAutoUpload() {
   uploadDebounceTimer = setTimeout(() => {
     performCloudUpload()
       .catch(err => {
-        console.error('[ProxySwitch] Auto upload failed:', err);
+        PSL.error('background', 'Auto upload failed', err.message);
       })
       .finally(() => {
         // 操作完成后清空引用

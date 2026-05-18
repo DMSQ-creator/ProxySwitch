@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await fetch(url);
       customMessages = await res.json();
     } catch (e) {
-      console.error("Failed to load language:", e);
+      PSL.error('options', 'Failed to load language pack', e.message);
     }
   }
 
@@ -59,6 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGfwModule();
   initSyncModule();
   initGeneralModule(); // 这里会初始化语言下拉框
+  initLogModule();
   
   renderAll();
 });
@@ -191,6 +192,7 @@ function initServerModule() {
       if (ms > 1500) color = 'var(--danger)';
       resEl.innerHTML = `<span style="color:${color}; font-weight:bold;">${i18n("msgSuccessLatency").replace('%MS%', ms)}</span>`;
     } catch (error) {
+      PSL.error('options', 'Latency test failed', error.message);
       const isTimeout = error.name === 'AbortError';
       const errorMsg = isTimeout ? i18n("msgTimeout") : i18n("msgFail");
       resEl.innerHTML = `<span style="color:var(--danger); font-weight:bold;">❌ ${errorMsg}</span>`;
@@ -353,7 +355,10 @@ function initRuleModule() {
             await loadAllData(); renderRuleList(); showToast(i18n("msgImportCount").replace('%COUNT%', data.length));
           });
         } else alert(i18n("msgJsonErr"));
-      } catch(e) { alert(i18n("msgParseErr")); }
+      } catch (e) {
+        PSL.error('options', 'Rule import parse failed', e.message);
+        alert(i18n("msgParseErr"));
+      }
     };
     reader.readAsText(file); e.target.value = '';
   };
@@ -576,7 +581,7 @@ function initGfwModule() {
       });
 
     } catch(error) {
-      console.error("Update Error:", error);
+      PSL.error('options', 'GFWList update failed', error.message);
       const isNetworkError = error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || error.message.includes('Status: 404') || error.message.includes('Status: 403');
       const hint = isNetworkError ? '\n\n' + i18n("msgGfwNetworkHint") : '';
       alert(i18n("msgUpdateFail") + ": " + error.message + hint);
@@ -626,7 +631,10 @@ function initSyncModule() {
            await loadAllData();
            updateSyncUI(res.time);
            showToast(i18n("msgUploadSuccess"));
-       } else showToast(i18n("msgUploadFail").replace('%ERR%', res.error || "Unknown"));
+       } else {
+         PSL.error('options', 'Cloud upload failed', res?.error || 'Unknown');
+         showToast(i18n("msgUploadFail").replace('%ERR%', res.error || "Unknown"));
+       }
     });
   };
   
@@ -638,7 +646,10 @@ function initSyncModule() {
            await loadAllData();
            renderAll(); 
            showToast(i18n("msgDownloadSuccess"));
-       } else showToast(i18n("msgDownloadFail").replace('%ERR%', res.error || "Unknown"));
+       } else {
+         PSL.error('options', 'Cloud download failed', res?.error || 'Unknown');
+         showToast(i18n("msgDownloadFail").replace('%ERR%', res.error || "Unknown"));
+       }
     });
   };
 }
@@ -687,4 +698,41 @@ function applyTheme(theme) {
 function showToast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function initLogModule() {
+  const logBox = $('#errorLogBox');
+  const verboseCb = $('#errorLogVerbose');
+  if (!logBox || !verboseCb) return;
+
+  const refreshLogs = async () => {
+    const logs = await PSL.getLogs();
+    logBox.value = PSL.formatLogs(logs) || i18n('phErrorLogEmpty');
+  };
+
+  PSL.getVerbose().then((v) => { verboseCb.checked = v; });
+  verboseCb.onchange = () => PSL.setVerbose(verboseCb.checked);
+
+  $('#copyErrorLogsBtn').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(logBox.value);
+      showToast(i18n('msgLogsCopied'));
+    } catch (e) {
+      logBox.select();
+      document.execCommand('copy');
+      showToast(i18n('msgLogsCopied'));
+    }
+  };
+
+  $('#clearErrorLogsBtn').onclick = async () => {
+    if (!confirm(i18n('msgConfirmClearLogs'))) return;
+    await PSL.clearLogs();
+    await refreshLogs();
+    showToast(i18n('msgLogsCleared'));
+  };
+
+  refreshLogs();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.errorLogs) refreshLogs();
+  });
 }

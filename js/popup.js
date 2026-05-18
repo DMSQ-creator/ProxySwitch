@@ -60,7 +60,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function loadBaseConfig() {
   return new Promise(resolve => {
     // 🚀 优化：不再加载全量数据(null)，只加载 UI 必需字段
-    chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage'], async (items) => {
+    chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage', 'pacScriptData'], async (items) => {
       // 1. 优先加载语言设置
       const userLang = items.appLanguage || 'auto';
       if (userLang !== 'auto') {
@@ -69,7 +69,7 @@ async function loadBaseConfig() {
           const res = await fetch(url);
           customMessages = await res.json();
         } catch (e) {
-          console.error("Popup failed to load language:", e);
+          PSL.error('popup', 'Failed to load language pack', e.message);
         }
       }
 
@@ -115,6 +115,10 @@ async function loadBaseConfig() {
           updateModeUI(currentMode);
         }
       });
+
+      if (!items.pacScriptData && (items.serverList || []).length) {
+        chrome.runtime.sendMessage({ type: 'ENSURE_PAC' });
+      }
       
       resolve();
     });
@@ -293,22 +297,53 @@ els.modeFixed.onclick = () => setMode('fixed_servers');
 els.modeDirect.onclick = () => setMode('direct');
 els.modeSystem.onclick = () => setMode('system');
 
+function applyPacMode(pacScriptData) {
+  applySetting({ mode: 'pac_script', pacScript: { data: pacScriptData } }, 'pac_script');
+}
+
 function setMode(mode) {
   const config = { mode: mode };
   if (mode === 'pac_script') {
-    chrome.storage.local.get(['pacScriptData'], (i) => {
-      if (i.pacScriptData) { 
-        config.pacScript = { data: i.pacScriptData }; 
-        applySetting(config, mode); 
-      } else alert(i18n("popErrPac"));
+    chrome.storage.local.get(['pacScriptData', 'serverList'], (i) => {
+      if (i.pacScriptData) {
+        applyPacMode(i.pacScriptData);
+        return;
+      }
+      if (!(i.serverList || []).length) {
+        PSL.warn('popup', 'No proxy server configured');
+        alert(i18n('popErrAddServer'));
+        chrome.runtime.openOptionsPage();
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'ENSURE_PAC' }, (res) => {
+        if (chrome.runtime.lastError) {
+          PSL.error('popup', 'ENSURE_PAC failed', chrome.runtime.lastError.message);
+          alert(i18n('popErrPac'));
+          return;
+        }
+        if (res?.success && res.pacScriptData) {
+          applyPacMode(res.pacScriptData);
+        } else if (res?.error === 'no_server') {
+          alert(i18n('popErrAddServer'));
+          chrome.runtime.openOptionsPage();
+        } else {
+          PSL.warn('popup', 'PAC generation failed', res?.error || 'unknown');
+          alert(i18n('popErrPac'));
+        }
+      });
     });
+    return;
   } else if (mode === 'fixed_servers') {
     chrome.storage.local.get(['serverList', 'activeServerId'], (i) => {
       const s = (i.serverList||[]).find(x => x.id === i.activeServerId);
       if (s) { 
         config.rules = { singleProxy: { scheme: s.scheme.toLowerCase(), host: s.host, port: parseInt(s.port || 80) } }; 
         applySetting(config, mode); 
-      } else { alert(i18n("popErrAddServer")); chrome.runtime.openOptionsPage(); }
+      } else {
+        PSL.warn('popup', 'No proxy server configured');
+        alert(i18n("popErrAddServer"));
+        chrome.runtime.openOptionsPage();
+      }
     });
   } else {
     // direct or system
@@ -317,7 +352,10 @@ function setMode(mode) {
 }
 
 function applySetting(c, m) { 
-  chrome.proxy.settings.set({ value: c, scope: 'regular' }, () => { 
+  chrome.proxy.settings.set({ value: c, scope: 'regular' }, () => {
+    if (chrome.runtime.lastError) {
+      PSL.error('popup', 'Proxy mode apply failed', chrome.runtime.lastError.message);
+    }
     currentMode = m; 
     updateModeUI(m); 
     // 刷新状态
@@ -351,7 +389,7 @@ function addRule(key) {
   // 【修复 3】核心防御：如果当前域名为空（尚未获取到或无效页面），直接终止
   // 这能防止即使按钮显示了，点击也不会报错
   if (!currentTabDomain) {
-    console.warn("当前域名为空，无法添加规则");
+    PSL.warn('popup', 'Cannot add rule', 'empty domain');
     return;
   }
 

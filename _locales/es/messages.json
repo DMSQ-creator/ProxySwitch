@@ -132,7 +132,7 @@
   "popBtnTempHint": { "message": "Reinicio al reiniciar" },
   "popBtnRemove": { "message": "Quitar Regla" },
   "popFooter": { "message": "Abrir Ajustes" },
-  "popErrPac": { "message": "PAC no listo, actualiza reglas en ajustes" },
+  "popErrPac": { "message": "No se pudo generar el PAC. Comprueba el servidor proxy e inténtalo de nuevo." },
   "popErrAddServer": { "message": "Añade un servidor primero" },
   "bgTitleAuto": { "message": "Auto (Directo)" },
   "bgTitleAutoProxy": { "message": "Auto (Proxy)" },
@@ -142,5 +142,14 @@
   "msgRuleModified": { "message": "Regla Modificada" },
   "msgMoreRules": { "message": "... Mostrando primeras %SHOWN%, quedan %REMAIN% - usa búsqueda ..." },
   "msgNoRules": { "message": "Sin Reglas" },
-  "msgGfwNetworkHint": { "message": "Puede ser un problema de red. Intenta cambiar a un mirror (jsDelivr CDN / GitMirror) arriba." }
+  "msgGfwNetworkHint": { "message": "Puede ser un problema de red. Intenta cambiar a un mirror (jsDelivr CDN / GitMirror) arriba." },
+  "titleErrorLog": { "message": "Registro de errores" },
+  "txtErrorLogHint": { "message": "Solo local (máx. 100). Sin tokens ni contraseñas. Copia al reportar problemas." },
+  "cbErrorLogVerbose": { "message": "Registro detallado (incl. depuración)" },
+  "btnCopyLogs": { "message": "📋 Copiar" },
+  "btnClearLogs": { "message": "🗑️ Borrar" },
+  "phErrorLogEmpty": { "message": "Sin errores registrados" },
+  "msgLogsCopied": { "message": "Registro copiado" },
+  "msgLogsCleared": { "message": "Registro borrado" },
+  "msgConfirmClearLogs": { "message": "¿Borrar todos los registros de error?" }
 }

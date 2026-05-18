@@ -132,7 +132,7 @@
   "popBtnTempHint": { "message": "浏览器重启后失效" },
   "popBtnRemove": { "message": "移除此规则" },
   "popFooter": { "message": "打开设置中心" },
-  "popErrPac": { "message": "PAC 未就绪，请先在设置页更新规则" },
+  "popErrPac": { "message": "PAC 脚本生成失败，请确认已配置代理服务器后重试" },
   "popErrAddServer": { "message": "请先添加服务器" },
   "bgTitleAuto": { "message": "自动分流 (直连)" },
   "bgTitleAutoProxy": { "message": "自动分流 (代理中)" },
@@ -142,5 +142,14 @@
   "msgRuleModified": { "message": "已修改" },
   "msgMoreRules": { "message": "... 已显示前 %SHOWN% 条，剩余 %REMAIN% 条请使用搜索查找 ..." },
   "msgNoRules": { "message": "暂无规则" },
-  "msgGfwNetworkHint": { "message": "可能是网络问题，请尝试切换上方的镜像源（jsDelivr CDN / GitMirror）。" }
+  "msgGfwNetworkHint": { "message": "可能是网络问题，请尝试切换上方的镜像源（jsDelivr CDN / GitMirror）。" },
+  "titleErrorLog": { "message": "错误日志" },
+  "txtErrorLogHint": { "message": "仅保存在本机，最多 100 条。不含 Token、密码或完整 URL。反馈问题时可复制下方内容。" },
+  "cbErrorLogVerbose": { "message": "记录详细日志（含调试信息）" },
+  "btnCopyLogs": { "message": "📋 复制日志" },
+  "btnClearLogs": { "message": "🗑️ 清空" },
+  "phErrorLogEmpty": { "message": "暂无错误记录" },
+  "msgLogsCopied": { "message": "日志已复制到剪贴板" },
+  "msgLogsCleared": { "message": "日志已清空" },
+  "msgConfirmClearLogs": { "message": "确定清空所有错误日志吗？" }
 }

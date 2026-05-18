@@ -132,7 +132,7 @@
   "popBtnTempHint": { "message": "Reset after restart" },
   "popBtnRemove": { "message": "Remove Rule" },
   "popFooter": { "message": "Open Settings" },
-  "popErrPac": { "message": "PAC not ready, update rules in settings" },
+  "popErrPac": { "message": "Failed to build PAC script. Check proxy server settings and try again." },
   "popErrAddServer": { "message": "Please add a server first" },
   "bgTitleAuto": { "message": "Auto (Direct)" },
   "bgTitleAutoProxy": { "message": "Auto (Proxy)" },
@@ -142,5 +142,14 @@
   "msgRuleModified": { "message": "Rule Modified" },
   "msgMoreRules": { "message": "... Showing first %SHOWN%, %REMAIN% more - use search to find ..." },
   "msgNoRules": { "message": "No Rules" },
-  "msgGfwNetworkHint": { "message": "This may be a network issue. Try switching to a mirror source (jsDelivr CDN / GitMirror) above." }
+  "msgGfwNetworkHint": { "message": "This may be a network issue. Try switching to a mirror source (jsDelivr CDN / GitMirror) above." },
+  "titleErrorLog": { "message": "Error Log" },
+  "txtErrorLogHint": { "message": "Stored locally only (max 100 entries). Tokens, passwords, and full URLs are redacted. Copy when reporting issues." },
+  "cbErrorLogVerbose": { "message": "Verbose logging (include debug info)" },
+  "btnCopyLogs": { "message": "📋 Copy Log" },
+  "btnClearLogs": { "message": "🗑️ Clear" },
+  "phErrorLogEmpty": { "message": "No errors recorded yet" },
+  "msgLogsCopied": { "message": "Log copied to clipboard" },
+  "msgLogsCleared": { "message": "Log cleared" },
+  "msgConfirmClearLogs": { "message": "Clear all error logs?" }
 }

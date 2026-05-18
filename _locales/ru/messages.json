@@ -132,7 +132,7 @@
   "popBtnTempHint": { "message": "Сброс после перезапуска" },
   "popBtnRemove": { "message": "Удалить правило" },
   "popFooter": { "message": "Открыть настройки" },
-  "popErrPac": { "message": "PAC не готов, обновите правила в настройках" },
+  "popErrPac": { "message": "Не удалось создать PAC. Проверьте настройки прокси-сервера и повторите." },
   "popErrAddServer": { "message": "Сначала добавьте сервер" },
   "bgTitleAuto": { "message": "Авто (Прямое)" },
   "bgTitleAutoProxy": { "message": "Авто (Прокси)" },
@@ -142,5 +142,14 @@
   "msgRuleModified": { "message": "Правило изменено" },
   "msgMoreRules": { "message": "... Показано первых %SHOWN%, осталось %REMAIN% — используйте поиск ..." },
   "msgNoRules": { "message": "Нет правил" },
-  "msgGfwNetworkHint": { "message": "Возможна проблема с сетью. Попробуйте переключиться на зеркало (jsDelivr CDN / GitMirror) выше." }
+  "msgGfwNetworkHint": { "message": "Возможна проблема с сетью. Попробуйте переключиться на зеркало (jsDelivr CDN / GitMirror) выше." },
+  "titleErrorLog": { "message": "Журнал ошибок" },
+  "txtErrorLogHint": { "message": "Только локально (до 100 записей). Без токенов и паролей. Копируйте при обращении в поддержку." },
+  "cbErrorLogVerbose": { "message": "Подробный журнал (вкл. отладку)" },
+  "btnCopyLogs": { "message": "📋 Копировать" },
+  "btnClearLogs": { "message": "🗑️ Очистить" },
+  "phErrorLogEmpty": { "message": "Ошибок пока нет" },
+  "msgLogsCopied": { "message": "Журнал скопирован" },
+  "msgLogsCleared": { "message": "Журнал очищен" },
+  "msgConfirmClearLogs": { "message": "Очистить весь журнал ошибок?" }
 }
