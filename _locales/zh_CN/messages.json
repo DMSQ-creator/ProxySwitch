@@ -150,6 +150,7 @@
   "btnClearLogs": { "message": "🗑️ 清空" },
   "phErrorLogEmpty": { "message": "暂无错误记录" },
   "msgLogsCopied": { "message": "日志已复制到剪贴板" },
+  "msgLogsCopyFail": { "message": "复制失败，请手动复制" },
   "msgLogsCleared": { "message": "日志已清空" },
   "msgConfirmClearLogs": { "message": "确定清空所有错误日志吗？" }
 }

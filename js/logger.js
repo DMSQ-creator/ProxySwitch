@@ -2,8 +2,13 @@
 const PSL = (function () {
   const STORAGE_KEY = 'errorLogs';
   const VERBOSE_KEY = 'errorLogVerbose';
-  const MAX_ENTRIES = 100;
+  const MAX_ENTRIES = 500;
   const MAX_DETAIL_LEN = 500;
+  const FLUSH_INTERVAL_MS = 2000;
+  const nowMs = () => Date.now();
+
+  let pendingEntries = [];
+  let flushTimer = null;
 
   function sanitize(value) {
     if (value == null) return '';
@@ -40,7 +45,7 @@ const PSL = (function () {
   async function append(level, source, message, detail) {
     if (!(await shouldLog(level))) return;
     const entry = {
-      time: new Date().toISOString(),
+      time: new Date().toLocaleString('zh-CN', { hour12: false }),
       level,
       source: sanitize(source),
       message: sanitize(message),
@@ -48,17 +53,45 @@ const PSL = (function () {
     const d = sanitize(detail);
     if (d) entry.detail = d;
 
+    pendingEntries.push(entry);
+    if (!flushTimer) {
+      flushTimer = setTimeout(flushToStorage, FLUSH_INTERVAL_MS);
+    }
+    // Also flush urgently for errors/warns
+    if (level === 'error' || level === 'warn') {
+      clearTimeout(flushTimer);
+      flushTimer = setTimeout(flushToStorage, 0);
+    }
+  }
+
+  async function flushToStorage() {
+    flushTimer = null;
+    if (pendingEntries.length === 0) return;
+    const batch = pendingEntries;
+    pendingEntries = [];
+
     const data = await chrome.storage.local.get(STORAGE_KEY);
     const logs = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
-    logs.push(entry);
+    for (const entry of batch) {
+      logs.push(entry);
+    }
     while (logs.length > MAX_ENTRIES) logs.shift();
     await chrome.storage.local.set({ [STORAGE_KEY]: logs });
+  }
+
+  async function perf(source, name, startMs, detail, warnThresholdMs) {
+    const dur = nowMs() - (startMs || nowMs());
+    const msg = `${name} ${dur}ms`;
+    if (typeof warnThresholdMs === 'number' && dur >= warnThresholdMs) {
+      return append('warn', source, msg, detail);
+    }
+    return append('info', source, msg, detail);
   }
 
   function formatLogs(logs) {
     if (!logs || logs.length === 0) return '';
     return logs.map((e) => {
-      const t = e.time ? e.time.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : '';
+      const t = e.time || '';
       let line = `[${t}] ${(e.level || 'info').toUpperCase()} ${e.source || ''}\n${e.message || ''}`;
       if (e.detail) line += `\n  → ${e.detail}`;
       return line;
@@ -86,6 +119,8 @@ const PSL = (function () {
       return Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
     },
     async clearLogs() {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      pendingEntries = [];
       await chrome.storage.local.set({ [STORAGE_KEY]: [] });
     },
     formatLogs,
@@ -95,5 +130,6 @@ const PSL = (function () {
     async getVerbose() {
       return isVerbose();
     },
+    perf,
   };
 })();

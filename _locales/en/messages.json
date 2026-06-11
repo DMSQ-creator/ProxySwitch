@@ -150,6 +150,7 @@
   "btnClearLogs": { "message": "🗑️ Clear" },
   "phErrorLogEmpty": { "message": "No errors recorded yet" },
   "msgLogsCopied": { "message": "Log copied to clipboard" },
+  "msgLogsCopyFail": { "message": "Copy failed, please copy manually" },
   "msgLogsCleared": { "message": "Log cleared" },
   "msgConfirmClearLogs": { "message": "Clear all error logs?" }
 }

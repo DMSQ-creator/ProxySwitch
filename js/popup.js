@@ -28,6 +28,8 @@ const els = {
 let currentTabDomain = '';
 let currentMode = 'direct';
 let customMessages = null;
+let currentTabLoading = false;
+let popupPort = null;
 
 // --- 核心：智能 i18n 函数 ---
 const i18n = (key) => {
@@ -37,22 +39,61 @@ const i18n = (key) => {
   return chrome.i18n.getMessage(key) || "";
 };
 
+window.addEventListener('error', (e) => {
+  PSL.error('popup', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e && e.reason;
+  PSL.error('popup', 'Unhandled rejection', r && (r.message || String(r)) || String(e));
+});
+
+function sendMessageWithTimeout(message, timeoutMs, label) {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      PSL.warn('popup', `${label} timeout`, `${timeoutMs}ms`);
+      resolve({ timeout: true });
+    }, timeoutMs);
+
+    chrome.runtime.sendMessage(message, (res) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (chrome.runtime.lastError) {
+        PSL.error('popup', `${label} sendMessage failed`, chrome.runtime.lastError.message);
+        resolve({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      PSL.perf('popup', label, t0, null, 300);
+      resolve(res);
+    });
+  });
+}
+
 // --- 初始化流程 ---
 (async function init() {
+  const t0 = Date.now();
+  PSL.info('popup', 'Init start');
   await loadBaseConfig(); // 这里面会加载语言包
   localizeHtmlPage();     // 翻译
   analyzeCurrentTab();    // 逻辑
+  PSL.perf('popup', 'Init done', t0, null, 300);
 })();
 
 
-// 监听配置变化
+// 监听配置变化（仅监听与 UI 相关的键，忽略 errorLogs 等高频写入项）
+const POPUP_RELEVANT_KEYS = ['serverList', 'activeServerId', 'userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'pacScriptData'];
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local') {
-    // 这里简单重新加载所有配置
-    loadBaseConfig().then(() => {
-        if (currentTabDomain) checkDomainStatusWrapper();
-    });
-  }
+  if (area !== 'local') return;
+  const changedKeys = Object.keys(changes);
+  if (!changedKeys.some(key => POPUP_RELEVANT_KEYS.includes(key))) return;
+  loadBaseConfig().then(() => {
+    if (currentTabDomain) checkDomainStatusWrapper(currentTabLoading);
+  });
 });
 
 // --- 核心功能函数 ---
@@ -117,7 +158,7 @@ async function loadBaseConfig() {
       });
 
       if (!items.pacScriptData && (items.serverList || []).length) {
-        chrome.runtime.sendMessage({ type: 'ENSURE_PAC' });
+        sendMessageWithTimeout({ type: 'ENSURE_PAC' }, 5000, 'ENSURE_PAC warmup').then(() => {});
       }
       
       resolve();
@@ -128,6 +169,20 @@ async function loadBaseConfig() {
 function analyzeCurrentTab() {
   chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
     const tab = tabs[0];
+    currentTabLoading = !!(tab && tab.status === 'loading');
+    if (!popupPort) {
+      try {
+        popupPort = chrome.runtime.connect({ name: 'popup' });
+        popupPort.onDisconnect.addListener(() => {
+          popupPort = null;
+        });
+      } catch (e) {
+        PSL.warn('popup', 'connect failed', e && e.message);
+      }
+    }
+    if (popupPort) {
+      popupPort.postMessage({ type: 'POPUP_OPEN', loading: currentTabLoading, tabUrl: tab && tab.url });
+    }
     
     // 【修复 1】严格校验 URL 协议
     // 只有 http 或 https 页面才显示添加按钮，chrome:// 或 file:// 等页面不显示
@@ -145,7 +200,7 @@ function analyzeCurrentTab() {
         // 默认先显示操作区，具体显示哪个按钮由 checkDomainStatus 决定
         if (els.actionArea) els.actionArea.style.display = 'block';
 
-        checkDomainStatusWrapper();
+        checkDomainStatusWrapper(currentTabLoading);
       } catch (e) {
         showInvalidPageUI();
       }
@@ -155,15 +210,20 @@ function analyzeCurrentTab() {
   });
 }
 
-function checkDomainStatusWrapper() {
+function checkDomainStatusWrapper(isLoading) {
   // 如果域名为空，不要去查 storage，直接显示无效 UI
   if (!currentTabDomain) {
     showInvalidPageUI();
     return;
   }
-  // 🚀 优化：只获取判断规则必需的字段，不再加载全量规则(null)
+  if (isLoading) {
+    chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist'], (items) => {
+      checkDomainStatus({ ...items, gfwDomains: [] }, { loading: true });
+    });
+    return;
+  }
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains'], (items) => {
-    checkDomainStatus(items);
+    checkDomainStatus(items, { loading: false });
   });
 }
 
@@ -184,17 +244,57 @@ function showInvalidPageUI() {
 }
 
 // 核心状态判断逻辑
-function checkDomainStatus(items) {
+function checkDomainStatus(items, opts) {
   // 双重保险
   if (!currentTabDomain) {
     showInvalidPageUI();
     return;
   }
 
+  const isLoading = !!(opts && opts.loading);
   const userRules = items.userRules || [];
   const tempRules = items.tempRules || [];
   const whitelist = items.userWhitelist || [];
   const gfwRules = items.gfwDomains || [];
+
+  const userRulesSet = new Set(userRules.filter(Boolean));
+  const tempRulesSet = new Set(tempRules.filter(Boolean));
+  const whitelistSet = new Set(whitelist.filter(Boolean));
+  const gfwRulesSet = new Set(gfwRules.filter(Boolean));
+
+  const wildcardSuffixes = userRules
+    .filter(r => typeof r === 'string' && r.startsWith('*.'))
+    .map(r => r.substring(2));
+
+  const matchDomain = (domain, set) => {
+    if (!set || set.size === 0 || !domain) return false;
+    const tryMatch = (d) => {
+      if (set.has(d)) return true;
+      if (set.has('.' + d)) return true;
+      if (set.has('*.' + d)) return true;
+      return false;
+    };
+
+    const cleanDomain = domain.replace(/^www\./, '');
+    if (tryMatch(domain) || tryMatch(cleanDomain)) return true;
+
+    let p = domain.indexOf('.');
+    while (p !== -1) {
+      if (tryMatch(domain.substring(p + 1))) return true;
+      p = domain.indexOf('.', p + 1);
+    }
+
+    return false;
+  };
+
+  const matchUserRules = (domain) => {
+    if (matchDomain(domain, userRulesSet)) return true;
+    if (!wildcardSuffixes.length) return false;
+    for (const suffix of wildcardSuffixes) {
+      if (domain === suffix || domain.endsWith('.' + suffix)) return true;
+    }
+    return false;
+  };
   
   let text = i18n("popStatusDirect");
   let icon = "🛡️";
@@ -203,29 +303,33 @@ function checkDomainStatus(items) {
   let statusClass = "status-direct";
 
   // 优先级判断：白名单 > 临时 > 用户黑名单 > GFWList
-  if (checkList(whitelist, currentTabDomain)) { 
+  if (matchDomain(currentTabDomain, whitelistSet)) { 
     text = i18n("popStatusForceDirect"); 
     icon = "🛡️";
     isWhite = true; 
     statusClass = "status-direct";
   } 
-  else if (checkList(tempRules, currentTabDomain)) { 
+  else if (matchDomain(currentTabDomain, tempRulesSet)) { 
     text = i18n("popStatusTemp"); 
     icon = "⏱️";
     isProxy = true; 
     statusClass = "status-temp"; // 橙色
   }
-  else if (checkList(userRules, currentTabDomain)) { 
+  else if (matchUserRules(currentTabDomain)) { 
     text = i18n("popStatusForceProxy"); 
     icon = "🚀";
     isProxy = true; 
     statusClass = "status-user"; // 紫色
   }
-  else if (checkList(gfwRules, currentTabDomain)) { 
+  else if (!isLoading && matchDomain(currentTabDomain, gfwRulesSet)) { 
     text = i18n("popStatusGfw"); 
     icon = "🌏";
     statusClass = "status-proxy"; // 绿色
-  } 
+  } else if (isLoading) {
+    text = i18n("statusNotLoaded");
+    icon = "⏳";
+    statusClass = "status-direct";
+  }
 
   els.status.textContent = text;
   els.statusIcon.textContent = icon;
@@ -287,7 +391,7 @@ function checkList(list, domain) {
 els.serverSelect.onchange = () => {
   const id = els.serverSelect.value;
   chrome.storage.local.set({ activeServerId: id }, () => {
-    chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+    sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
   });
 };
 
@@ -315,9 +419,12 @@ function setMode(mode) {
         chrome.runtime.openOptionsPage();
         return;
       }
-      chrome.runtime.sendMessage({ type: 'ENSURE_PAC' }, (res) => {
-        if (chrome.runtime.lastError) {
-          PSL.error('popup', 'ENSURE_PAC failed', chrome.runtime.lastError.message);
+      sendMessageWithTimeout({ type: 'ENSURE_PAC' }, 8000, 'ENSURE_PAC').then((res) => {
+        if (res && res.timeout) {
+          alert(i18n('popErrPac'));
+          return;
+        }
+        if (res && res.error) {
           alert(i18n('popErrPac'));
           return;
         }
@@ -358,9 +465,9 @@ function applySetting(c, m) {
     }
     currentMode = m; 
     updateModeUI(m); 
-    // 刷新状态
-    if (currentTabDomain) checkDomainStatusWrapper();
-    chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+    // 刷新状态（传递正确 loading 标志）
+    if (currentTabDomain) checkDomainStatusWrapper(currentTabLoading);
+    sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
   }); 
 }
 
@@ -402,10 +509,8 @@ function addRule(key) {
       list.push(root);
       // 保存数据
       chrome.storage.local.set({ [key]: list }, () => {
-        // 保存成功后，立即通知后台刷新 PAC 和图标
-        chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
-        // 同时刷新 popup 自身的 UI 状态
-        checkDomainStatusWrapper();
+        sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
+        checkDomainStatusWrapper(currentTabLoading);
       });
     }
   });
@@ -416,7 +521,20 @@ function removeDomainRule() {
 
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist'], (i) => {
     const root = getRootDomain(currentTabDomain);
-    const filterFn = d => d !== currentTabDomain && d !== root && d !== currentTabDomain.replace(/^www\./, '');
+    const plain = currentTabDomain.replace(/^www\./, '');
+    const filterFn = d => {
+      if (d === currentTabDomain) return false;
+      if (d === root) return false;
+      if (d === plain) return false;
+      // Also match *.pattern and .pattern prefixed rules
+      if (d === '*.' + root) return false;
+      if (d === '.' + root) return false;
+      if (d === '*.' + plain) return false;
+      if (d === '.' + plain) return false;
+      if (d === '*.' + currentTabDomain) return false;
+      if (d === '.' + currentTabDomain) return false;
+      return true;
+    };
     
     // 保存数据
     chrome.storage.local.set({
@@ -424,10 +542,8 @@ function removeDomainRule() {
       userWhitelist: (i.userWhitelist||[]).filter(filterFn),
       userRules: (i.userRules||[]).filter(filterFn)
     }, () => {
-      // 保存成功后，立即通知后台刷新 PAC 和图标
-      chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
-      // 同时刷新 popup 自身的 UI 状态
-      checkDomainStatusWrapper();
+      sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
+      checkDomainStatusWrapper(currentTabLoading);
     });
   });
 }

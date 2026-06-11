@@ -1,6 +1,34 @@
 // js/background.js - ProxySwitch
 importScripts('logger.js');
 
+self.addEventListener('error', (e) => {
+  PSL.error('background', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
+});
+
+self.addEventListener('unhandledrejection', (e) => {
+  const r = e && e.reason;
+  PSL.error('background', 'Unhandled rejection', r && (r.message || String(r)) || String(e));
+});
+
+// ===== 兼容性 fallback =====
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 // ===== 全局变量 =====
 let cachedUserRules = new Set();
 let cachedUserWhitelist = new Set();
@@ -24,9 +52,20 @@ let currentProxyMode = 'direct';
 // 🔥 修复 Bug #2: 竞态条件防护
 let activeTabId = null;
 let pendingIconUpdates = new Map(); // tabId -> timeout
+let loadingTabs = new Set();
 
 const CONFIG_FILE_NAME = 'proxyswitch_config.json';
 const DAV_DIR_NAME = 'ProxySwitch';
+const PAC_RELATED_KEYS = [
+  'userRules',
+  'userWhitelist',
+  'gfwDomains',
+  'tempRules',
+  'serverList',
+  'activeServerId',
+  'pacScriptData',
+  'pacHash',
+];
 
 // ===== 初始化 Promise =====
 let initReadyResolver = null;
@@ -141,11 +180,13 @@ function persistPacScriptIfNeeded(items, pacScriptStr, callback) {
   }
   isApplyingProxy = true;
   pacUpdateVersion++;
+  const tSet = Date.now();
   chrome.storage.local.set({
     pacScriptData: pacScriptStr,
     pacVersion: pacUpdateVersion,
     pacHash: newPacHash,
   }, () => {
+    PSL.perf('background', 'PAC persist set', tSet, `len=${pacScriptStr.length}`, 300);
     lastPacHash = newPacHash;
     isApplyingProxy = false;
     if (callback) callback();
@@ -158,7 +199,7 @@ chrome.runtime.onInstalled.addListener(async (d) => {
     const items = await chrome.storage.local.get(['serverList']);
     if (!items.serverList || items.serverList.length === 0) {
       const def = { 
-        id: crypto.randomUUID(), 
+        id: generateUUID(), 
         name: 'Default', 
         scheme: 'SOCKS5', 
         host: '127.0.0.1', 
@@ -226,9 +267,17 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 // ===== 消息监听 =====
 chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
   if (m.type === 'REFRESH_PROXY') {
-    refreshCacheAndIcon();
+    const t0 = Date.now();
+    refreshCacheAndIcon(() => {
+      PSL.perf('background', 'REFRESH_PROXY total', t0, null, 300);
+      sendResponse({ success: true });
+    });
+    return true;
   } else if (m.type === 'ENSURE_PAC') {
-    chrome.storage.local.get(null, (items) => {
+    const t0 = Date.now();
+    const tGet = Date.now();
+    chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
+      PSL.perf('background', 'ENSURE_PAC storage.get', tGet, null, 200);
       cachedUserRules = normalizeSet(items.userRules);
       cachedUserWhitelist = normalizeSet(items.userWhitelist);
       cachedGfwDomains = normalizeSet(items.gfwDomains);
@@ -236,12 +285,15 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
       if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
 
       const activeServer = resolveActiveServer(items);
+      const tBuild = Date.now();
       const pacScriptStr = buildPacScriptString(activeServer);
+      PSL.perf('background', 'ENSURE_PAC buildPac', tBuild, `len=${pacScriptStr ? pacScriptStr.length : 0}`, 300);
       if (!pacScriptStr) {
         sendResponse({ success: false, error: 'no_server' });
         return;
       }
       persistPacScriptIfNeeded(items, pacScriptStr, () => {
+        PSL.perf('background', 'ENSURE_PAC total', t0, null, 500);
         sendResponse({ success: true, pacScriptData: pacScriptStr });
       });
     });
@@ -267,6 +319,23 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
   }
 });
 
+chrome.runtime.onConnect.addListener((port) => {
+  if (!port || port.name !== 'popup') return;
+  const t0 = Date.now();
+  PSL.info('background', 'Popup port connected');
+  port.onMessage.addListener((msg) => {
+    if (!msg) return;
+    if (msg.type === 'POPUP_OPEN') {
+      const d = `loading=${!!msg.loading}${msg.tabUrl ? ` tabUrl=${msg.tabUrl}` : ''}`;
+      PSL.info('background', 'Popup open', d);
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    PSL.perf('background', 'Popup session', t0, null, 500);
+    PSL.info('background', 'Popup port disconnected');
+  });
+});
+
 // 启动时预渲染
 preloadAllIcons().then(updateCacheAndApply);
 
@@ -283,7 +352,8 @@ function normalizeSet(list) {
       try { 
         if (!raw.includes('*')) raw = new URL('http://' + raw).hostname; 
       } catch (e) { 
-        return null; 
+        PSL.warn('background', 'normalizeSet: IDN parse failed, keeping original', raw);
+        // keep original raw value rather than silently dropping
       }
     }
     return prefix + raw;
@@ -295,8 +365,13 @@ function normalizeSet(list) {
  * without re-applying proxy mode. Used for REFRESH_PROXY messages from popup
  * to avoid background overwriting popup's just-set proxy config.
  */
-function refreshCacheAndIcon() {
-  chrome.storage.local.get(null, (items) => {
+function refreshCacheAndIcon(done) {
+  if (isApplyingProxy) {
+    setTimeout(() => refreshCacheAndIcon(done), 50);
+    return;
+  }
+  isApplyingProxy = true;
+  chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
     cachedUserRules = normalizeSet(items.userRules);
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
@@ -309,6 +384,8 @@ function refreshCacheAndIcon() {
         const mode = (d && d.value) ? d.value.mode : 'direct';
         currentProxyMode = mode;
         handleGlobalIconUpdate(mode);
+        isApplyingProxy = false;
+        if (done) done();
       });
     });
   });
@@ -322,7 +399,7 @@ function updateCacheAndApply(specificTabId, specificUrl) {
     return;
   }
   
-  chrome.storage.local.get(null, (items) => {
+  chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
     // 1. 更新内存缓存
     cachedUserRules = normalizeSet(items.userRules);
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
@@ -378,6 +455,16 @@ function applyProxySettings(items, callback) {
           } else {
             PSL.info('background', 'PAC proxy settings applied');
           }
+          if (cb) cb();
+        });
+      } else if (mode === 'pac_script' && !pacScriptStr) {
+        PSL.warn('background', 'PAC mode but no active server, falling back to direct');
+        chrome.proxy.settings.set({
+          value: { mode: "direct" },
+          scope: 'regular'
+        }, () => {
+          currentProxyMode = 'direct';
+          handleGlobalIconUpdate('direct');
           if (cb) cb();
         });
       } else if (mode === 'fixed_servers' && activeServer) {
@@ -586,8 +673,12 @@ async function performCloudDownload(){
       const timeDisplay = new Date().toLocaleString();
       await chrome.storage.local.set({ lastSyncTime: timeDisplay });
       
-      // 3. 立即触发代理刷新
-      setTimeout(() => updateCacheAndApply(), 200);
+      // 3. 立即触发代理刷新（存储定时器引用，防止 SW 终止丢失）
+      if (uploadDebounceTimer) { clearTimeout(uploadDebounceTimer); uploadDebounceTimer = null; }
+      uploadDebounceTimer = setTimeout(() => {
+        uploadDebounceTimer = null;
+        updateCacheAndApply();
+      }, 200);
       
       return timeDisplay;
     } else {
@@ -656,7 +747,11 @@ async function preloadAllIcons() {
 }
 
 function createIconImageData(color, text) {
-  const c = new OffscreenCanvas(32,32);
+  if (typeof OffscreenCanvas === 'undefined') {
+    PSL.warn('background', 'OffscreenCanvas not available, icon rendering skipped');
+    return null;
+  }
+  const c = new OffscreenCanvas(32, 32);
   const ctx = c.getContext('2d');
   const radius = 8; 
   
@@ -800,6 +895,15 @@ function updateTabIcon(tabId, url) {
   pendingIconUpdates.set(tabId, timerId);
 }
 
+function setTabLoadingIcon(tabId) {
+  if (!tabId || currentProxyMode !== 'pac_script') return;
+  const title = chrome.i18n.getMessage("bgTitleAuto");
+  if (iconDataCache.pac_gray) {
+    chrome.action.setIcon({ imageData: iconDataCache.pac_gray, tabId });
+    chrome.action.setTitle({ title: `ProxySwitch: ${title}`, tabId });
+  }
+}
+
 /**
  * 更新当前激活标签的图标
  */
@@ -834,10 +938,23 @@ function checkSet(h, s) {
 
 // ===== 事件监听 =====
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (currentProxyMode === 'pac_script' && tab.url) { 
-    await initPromise; 
-    updateTabIcon(tabId, tab.url); 
+  if (currentProxyMode !== 'pac_script') return;
+  if (!tab || !tab.url) return;
+
+  const isActiveTab = tab.active || tabId === activeTabId;
+  if (!isActiveTab) return;
+
+  if (changeInfo.status === 'loading') {
+    loadingTabs.add(tabId);
+    setTabLoadingIcon(tabId);
+    return;
   }
+
+  if (changeInfo.status !== 'complete') return;
+
+  loadingTabs.delete(tabId);
+  await initPromise;
+  updateTabIcon(tabId, tab.url);
 });
 
 /**
@@ -853,9 +970,23 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       if (tabs[0] && tabs[0].id === activeInfo.tabId) {
         activeTabId = tabs[0].id;
         if (tabs[0].url) {
+          if (tabs[0].status === 'loading') {
+            loadingTabs.add(tabs[0].id);
+            setTabLoadingIcon(tabs[0].id);
+            return;
+          }
+          loadingTabs.delete(tabs[0].id);
           updateTabIcon(tabs[0].id, tabs[0].url);
         }
       }
     });
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  loadingTabs.delete(tabId);
+  if (pendingIconUpdates.has(tabId)) {
+    clearTimeout(pendingIconUpdates.get(tabId));
+    pendingIconUpdates.delete(tabId);
   }
 });

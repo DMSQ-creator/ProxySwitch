@@ -1,5 +1,23 @@
 // js/options.js
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
 const LATENCY_TEST_URL = 'http://www.gstatic.com/generate_204';
 const MAX_DISPLAY_RULES = 500;
@@ -21,6 +39,41 @@ const i18n = (key) => {
   }
   return chrome.i18n.getMessage(key) || "";
 };
+
+window.addEventListener('error', (e) => {
+  PSL.error('options', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e && e.reason;
+  PSL.error('options', 'Unhandled rejection', r && (r.message || String(r)) || String(e));
+});
+
+function sendMessageWithTimeout(message, timeoutMs, label) {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      PSL.warn('options', `${label} timeout`, `${timeoutMs}ms`);
+      resolve({ timeout: true });
+    }, timeoutMs);
+
+    chrome.runtime.sendMessage(message, (res) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (chrome.runtime.lastError) {
+        PSL.error('options', `${label} sendMessage failed`, chrome.runtime.lastError.message);
+        resolve({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      PSL.perf('options', label, t0, null, 300);
+      resolve(res);
+    });
+  });
+}
 
 // --- 初始化入口 ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -113,7 +166,9 @@ function localizeHtmlPage() {
 
 async function loadAllData() {
   return new Promise(resolve => {
+    const t0 = Date.now();
     chrome.storage.local.get(null, (items) => {
+      PSL.perf('options', 'loadAllData storage.get', t0, null, 500);
       allData = items;
       resolve(items);
     });
@@ -205,7 +260,7 @@ function initServerModule() {
 function renderServerList() {
   const container = $('#serverListContainer');
   container.innerHTML = '';
-  const servers = allData.serverList || [];
+  let servers = allData.serverList || [];
   const activeId = allData.activeServerId;
 
   if (servers.length === 0) {
@@ -213,7 +268,7 @@ function renderServerList() {
     allData.serverList = [def];
     allData.activeServerId = 'default';
     chrome.storage.local.set({ serverList: [def], activeServerId: 'default' });
-    return renderServerList();
+    servers = allData.serverList;
   }
 
   servers.forEach(srv => {
@@ -294,7 +349,7 @@ function saveServer() {
   }
 
   const scheme = $('#editScheme').value;
-  const newSrv = { id: editingServerId || crypto.randomUUID(), name, scheme, host, port };
+  const newSrv = { id: editingServerId || generateUUID(), name, scheme, host, port };
   let list = allData.serverList || [];
   
   if (editingServerId) {
@@ -309,7 +364,7 @@ function saveServer() {
     closeServerEdit();
     renderServerList();
     showToast(i18n("msgSaved"));
-    chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+    sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
   });
 }
 
@@ -577,7 +632,7 @@ function initGfwModule() {
         await loadAllData();
         updateGfwStatus(domainArray.length, updateTime);
         showToast(i18n("msgUpdateSuccess").replace('%COUNT%', domainArray.length));
-        chrome.runtime.sendMessage({type: 'REFRESH_PROXY'});
+        sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
       });
 
     } catch(error) {
@@ -626,14 +681,14 @@ function initSyncModule() {
   
   $('#cloudUploadBtn').onclick = () => {
     showToast(i18n("msgUploading"));
-    chrome.runtime.sendMessage({type: 'MANUAL_SYNC_UPLOAD'}, async (res) => {
+    sendMessageWithTimeout({type: 'MANUAL_SYNC_UPLOAD'}, 30000, 'MANUAL_SYNC_UPLOAD').then(async (res) => {
        if (res && res.success) {
            await loadAllData();
            updateSyncUI(res.time);
            showToast(i18n("msgUploadSuccess"));
        } else {
          PSL.error('options', 'Cloud upload failed', res?.error || 'Unknown');
-         showToast(i18n("msgUploadFail").replace('%ERR%', res.error || "Unknown"));
+         showToast(i18n("msgUploadFail").replace('%ERR%', res?.error || "Unknown"));
        }
     });
   };
@@ -641,14 +696,14 @@ function initSyncModule() {
   $('#cloudDownloadBtn').onclick = () => {
     if(!confirm(i18n("msgConfirmDownload"))) return;
     showToast(i18n("msgDownloadingBg"));
-    chrome.runtime.sendMessage({type: 'MANUAL_SYNC_DOWNLOAD'}, async (res) => {
+    sendMessageWithTimeout({type: 'MANUAL_SYNC_DOWNLOAD'}, 30000, 'MANUAL_SYNC_DOWNLOAD').then(async (res) => {
        if (res && res.success) {
            await loadAllData();
            renderAll(); 
            showToast(i18n("msgDownloadSuccess"));
        } else {
          PSL.error('options', 'Cloud download failed', res?.error || 'Unknown');
-         showToast(i18n("msgDownloadFail").replace('%ERR%', res.error || "Unknown"));
+         showToast(i18n("msgDownloadFail").replace('%ERR%', res?.error || "Unknown"));
        }
     });
   };
@@ -686,7 +741,17 @@ function initGeneralModule() {
     };
   }
 
-  $('#resetAppBtn').onclick = () => { if (confirm(i18n("msgConfirmReset"))) chrome.storage.local.clear(() => chrome.runtime.reload()); };
+  $('#resetAppBtn').onclick = () => {
+    if (confirm(i18n("msgConfirmReset"))) {
+      chrome.storage.local.clear(() => {
+        if (chrome.runtime.lastError) {
+          alert(chrome.runtime.lastError.message);
+          return;
+        }
+        chrome.runtime.reload();
+      });
+    }
+  };
 }
 
 function applyTheme(theme) {
@@ -718,9 +783,13 @@ function initLogModule() {
       await navigator.clipboard.writeText(logBox.value);
       showToast(i18n('msgLogsCopied'));
     } catch (e) {
-      logBox.select();
-      document.execCommand('copy');
-      showToast(i18n('msgLogsCopied'));
+      try {
+        logBox.select();
+        const ok = document.execCommand('copy');
+        showToast(ok ? i18n('msgLogsCopied') : i18n('msgLogsCopyFail'));
+      } catch (e2) {
+        showToast(i18n('msgLogsCopyFail'));
+      }
     }
   };
 

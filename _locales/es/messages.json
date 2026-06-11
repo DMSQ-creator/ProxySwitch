@@ -150,6 +150,7 @@
   "btnClearLogs": { "message": "🗑️ Borrar" },
   "phErrorLogEmpty": { "message": "Sin errores registrados" },
   "msgLogsCopied": { "message": "Registro copiado" },
+  "msgLogsCopyFail": { "message": "Error al copiar" },
   "msgLogsCleared": { "message": "Registro borrado" },
   "msgConfirmClearLogs": { "message": "¿Borrar todos los registros de error?" }
 }

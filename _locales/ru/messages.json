@@ -150,6 +150,7 @@
   "btnClearLogs": { "message": "🗑️ Очистить" },
   "phErrorLogEmpty": { "message": "Ошибок пока нет" },
   "msgLogsCopied": { "message": "Журнал скопирован" },
+  "msgLogsCopyFail": { "message": "Не удалось скопировать" },
   "msgLogsCleared": { "message": "Журнал очищен" },
   "msgConfirmClearLogs": { "message": "Очистить весь журнал ошибок?" }
 }
