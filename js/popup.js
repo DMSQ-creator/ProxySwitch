@@ -30,6 +30,7 @@ let currentMode = 'direct';
 let customMessages = null;
 let currentTabLoading = false;
 let popupPort = null;
+let initDone = false;
 
 // --- 核心：智能 i18n 函数 ---
 const i18n = (key) => {
@@ -78,9 +79,16 @@ function sendMessageWithTimeout(message, timeoutMs, label) {
 (async function init() {
   const t0 = Date.now();
   PSL.info('popup', 'Init start');
-  await loadBaseConfig(); // 这里面会加载语言包
-  localizeHtmlPage();     // 翻译
-  analyzeCurrentTab();    // 逻辑
+  const configPromise = loadBaseConfig();
+  const timeoutPromise = new Promise(resolve => {
+    setTimeout(() => resolve(null), 3000);
+  });
+  await Promise.race([configPromise, timeoutPromise]);
+  if (!initDone) {
+    initDone = true;
+    localizeHtmlPage();
+    analyzeCurrentTab();
+  }
   PSL.perf('popup', 'Init done', t0, null, 300);
 })();
 
@@ -100,28 +108,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function loadBaseConfig() {
   return new Promise(resolve => {
-    // 🚀 优化：不再加载全量数据(null)，只加载 UI 必需字段
     chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage', 'pacScriptData'], async (items) => {
-      // 1. 优先加载语言设置
       const userLang = items.appLanguage || 'auto';
       if (userLang !== 'auto') {
-        try {
-          const url = chrome.runtime.getURL(`_locales/${userLang}/messages.json`);
-          const res = await fetch(url);
-          customMessages = await res.json();
-        } catch (e) {
-          PSL.error('popup', 'Failed to load language pack', e.message);
-        }
+        loadLanguagePack(userLang);
       }
 
-      // 2. 应用主题
       const theme = items.theme || 'system';
       const doc = document.documentElement;
       if (theme === 'dark') doc.setAttribute('data-theme', 'dark');
       else if (theme === 'light') doc.setAttribute('data-theme', 'light');
       else doc.removeAttribute('data-theme');
 
-      // 3. 渲染服务器列表
       const servers = items.serverList || [];
       const activeId = items.activeServerId;
       
@@ -149,7 +147,6 @@ async function loadBaseConfig() {
         els.serverSelect.value = activeId;
       }
 
-      // 4. 获取当前代理模式
       chrome.proxy.settings.get({}, (d) => {
         if (d && d.value) {
           currentMode = d.value.mode;
@@ -161,14 +158,35 @@ async function loadBaseConfig() {
         sendMessageWithTimeout({ type: 'ENSURE_PAC' }, 5000, 'ENSURE_PAC warmup').then(() => {});
       }
       
+      if (!initDone) {
+        initDone = true;
+        localizeHtmlPage();
+        analyzeCurrentTab();
+      }
       resolve();
     });
   });
 }
 
+async function loadLanguagePack(lang) {
+  try {
+    const url = chrome.runtime.getURL(`_locales/${lang}/messages.json`);
+    const res = await fetch(url);
+    customMessages = await res.json();
+    localizeHtmlPage();
+  } catch (e) {
+    PSL.error('popup', 'Failed to load language pack', e.message);
+  }
+}
+
 function analyzeCurrentTab() {
   chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-    const tab = tabs[0];
+    if (chrome.runtime.lastError) {
+      PSL.error('popup', 'tabs.query failed', chrome.runtime.lastError.message);
+      showInvalidPageUI();
+      return;
+    }
+    const tab = tabs && tabs[0];
     currentTabLoading = !!(tab && tab.status === 'loading');
     if (!popupPort) {
       try {
@@ -184,20 +202,23 @@ function analyzeCurrentTab() {
       popupPort.postMessage({ type: 'POPUP_OPEN', loading: currentTabLoading, tabUrl: tab && tab.url });
     }
     
-    // 【修复 1】严格校验 URL 协议
-    // 只有 http 或 https 页面才显示添加按钮，chrome:// 或 file:// 等页面不显示
+    let effectiveUrl = null;
     if (tab && tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+      effectiveUrl = tab.url;
+    } else if (tab && tab.pendingUrl && (tab.pendingUrl.startsWith('http://') || tab.pendingUrl.startsWith('https://'))) {
+      effectiveUrl = tab.pendingUrl;
+    }
+
+    if (effectiveUrl) {
       try {
-        const url = new URL(tab.url);
+        const url = new URL(effectiveUrl);
         currentTabDomain = url.hostname.toLowerCase();
-        
-        // 再次校验非空
+
         if (!currentTabDomain) throw new Error("Empty hostname");
 
         els.domain.textContent = currentTabDomain;
         els.domainArea.style.display = 'flex'; 
-        
-        // 默认先显示操作区，具体显示哪个按钮由 checkDomainStatus 决定
+
         if (els.actionArea) els.actionArea.style.display = 'block';
 
         checkDomainStatusWrapper(currentTabLoading);
@@ -493,8 +514,6 @@ function getRootDomain(hostname) {
 }
 
 function addRule(key) {
-  // 【修复 3】核心防御：如果当前域名为空（尚未获取到或无效页面），直接终止
-  // 这能防止即使按钮显示了，点击也不会报错
   if (!currentTabDomain) {
     PSL.warn('popup', 'Cannot add rule', 'empty domain');
     return;
@@ -503,21 +522,31 @@ function addRule(key) {
   const root = getRootDomain(currentTabDomain);
   if (!root) return;
 
+  const btn = key === 'userRules' ? els.addRuleBtn : els.addTempRuleBtn;
+  if (btn && btn.disabled) return;
+  if (btn) btn.disabled = true;
+
   chrome.storage.local.get([key], (i) => {
     const list = i[key] || []; 
     if (!list.includes(root)) {
       list.push(root);
-      // 保存数据
       chrome.storage.local.set({ [key]: list }, () => {
         sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
         checkDomainStatusWrapper(currentTabLoading);
+        if (btn) btn.disabled = false;
       });
+    } else {
+      checkDomainStatusWrapper(currentTabLoading);
+      if (btn) btn.disabled = false;
     }
   });
 }
 
 function removeDomainRule() {
-  if (!currentTabDomain) return; // 防御
+  if (!currentTabDomain) return;
+
+  if (els.removeBtn && els.removeBtn.disabled) return;
+  if (els.removeBtn) els.removeBtn.disabled = true;
 
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist'], (i) => {
     const root = getRootDomain(currentTabDomain);
@@ -526,7 +555,6 @@ function removeDomainRule() {
       if (d === currentTabDomain) return false;
       if (d === root) return false;
       if (d === plain) return false;
-      // Also match *.pattern and .pattern prefixed rules
       if (d === '*.' + root) return false;
       if (d === '.' + root) return false;
       if (d === '*.' + plain) return false;
@@ -536,7 +564,6 @@ function removeDomainRule() {
       return true;
     };
     
-    // 保存数据
     chrome.storage.local.set({
       tempRules: (i.tempRules||[]).filter(filterFn),
       userWhitelist: (i.userWhitelist||[]).filter(filterFn),
@@ -544,6 +571,7 @@ function removeDomainRule() {
     }, () => {
       sendMessageWithTimeout({type: 'REFRESH_PROXY'}, 2000, 'REFRESH_PROXY').then(() => {});
       checkDomainStatusWrapper(currentTabLoading);
+      if (els.removeBtn) els.removeBtn.disabled = false;
     });
   });
 }

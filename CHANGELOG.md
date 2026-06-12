@@ -1,4 +1,11 @@
 # 更新说明
+## v7.8.6
+- 修复：页面未加载或加载失败时点击插件图标弹窗卡死的问题——语言包 fetch 改为非阻塞加载，init 流程增加 3 秒超时兜底
+- 修复：页面加载中 `tab.url` 可能为空导致域名获取失败，新增 `tab.pendingUrl` 备选方案
+- 修复：后台 `refreshCacheAndIcon` 和 `updateCacheAndApply` 在 `isApplyingProxy` 锁住时无限重试，现加上限（约 1 秒）并强制解锁
+- 修复：添加/移除规则按钮在操作期间未禁用，连续点击可能触发多个并发存储写入，现已加防重复点击保护
+- 修复：`chrome.tabs.query` 回调缺少 `lastError` 检查，异常时可能导致弹窗无响应
+
 ## v7.8.5
 - 修复：`generateUUID` 兼容性 fallback 增加 `crypto` 对象存在性检查，并添加 `Math.random` 兜底方案
 - 修复：Service Worker 中 `OffscreenCanvas` 不可用时不再尝试调用 `document.createElement`（Service Worker 无 DOM），改为跳过图标渲染并记录警告

@@ -367,7 +367,22 @@ function normalizeSet(list) {
  */
 function refreshCacheAndIcon(done) {
   if (isApplyingProxy) {
-    setTimeout(() => refreshCacheAndIcon(done), 50);
+    let retries = 0;
+    const tryAgain = () => {
+      if (!isApplyingProxy) {
+        refreshCacheAndIcon(done);
+        return;
+      }
+      retries++;
+      if (retries > 20) {
+        PSL.warn('background', 'refreshCacheAndIcon timeout, forcing unlock');
+        isApplyingProxy = false;
+        refreshCacheAndIcon(done);
+        return;
+      }
+      setTimeout(tryAgain, 50);
+    };
+    setTimeout(tryAgain, 50);
     return;
   }
   isApplyingProxy = true;
@@ -391,12 +406,16 @@ function refreshCacheAndIcon(done) {
   });
 }
 
-function updateCacheAndApply(specificTabId, specificUrl) {
-  // 🔥 修复 Bug #1.4: 队列化处理，防止重入
+function updateCacheAndApply(specificTabId, specificUrl, _retries) {
   if (isApplyingProxy) {
-    console.log('[ProxySwitch] Update queued: operation in progress');
-    setTimeout(() => updateCacheAndApply(specificTabId, specificUrl), 100);
-    return;
+    const retries = (_retries || 0) + 1;
+    if (retries > 20) {
+      PSL.warn('background', 'updateCacheAndApply timeout, forcing unlock');
+      isApplyingProxy = false;
+    } else {
+      setTimeout(() => updateCacheAndApply(specificTabId, specificUrl, retries), 100);
+      return;
+    }
   }
   
   chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
