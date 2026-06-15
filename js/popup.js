@@ -31,6 +31,7 @@ let customMessages = null;
 let currentTabLoading = false;
 let popupPort = null;
 let initDone = false;
+let popupReloadTimer = null;
 
 // --- 核心：智能 i18n 函数 ---
 const i18n = (key) => {
@@ -99,9 +100,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const changedKeys = Object.keys(changes);
   if (!changedKeys.some(key => POPUP_RELEVANT_KEYS.includes(key))) return;
-  loadBaseConfig().then(() => {
-    if (currentTabDomain) checkDomainStatusWrapper(currentTabLoading);
-  });
+  if (popupReloadTimer) clearTimeout(popupReloadTimer);
+  popupReloadTimer = setTimeout(() => {
+    popupReloadTimer = null;
+    loadBaseConfig().then(() => {
+      if (currentTabDomain) checkDomainStatusWrapper(currentTabLoading);
+    });
+  }, 120);
 });
 
 // --- 核心功能函数 ---
@@ -154,10 +159,6 @@ async function loadBaseConfig() {
         }
       });
 
-      if (!items.pacScriptData && (items.serverList || []).length) {
-        sendMessageWithTimeout({ type: 'ENSURE_PAC' }, 5000, 'ENSURE_PAC warmup').then(() => {});
-      }
-      
       if (!initDone) {
         initDone = true;
         localizeHtmlPage();
@@ -238,9 +239,14 @@ function checkDomainStatusWrapper(isLoading) {
     return;
   }
   if (isLoading) {
-    chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist'], (items) => {
-      checkDomainStatus({ ...items, gfwDomains: [] }, { loading: true });
-    });
+    els.status.textContent = i18n("statusNotLoaded");
+    els.statusIcon.textContent = "⏳";
+    const wrapper = document.querySelector('.domain-card');
+    if (wrapper) {
+      wrapper.className = 'domain-card status-direct';
+    }
+    if (els.addBtnGroup) els.addBtnGroup.style.display = 'none';
+    if (els.removeBtn) els.removeBtn.style.display = 'none';
     return;
   }
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains'], (items) => {
@@ -266,7 +272,6 @@ function showInvalidPageUI() {
 
 // 核心状态判断逻辑
 function checkDomainStatus(items, opts) {
-  // 双重保险
   if (!currentTabDomain) {
     showInvalidPageUI();
     return;
@@ -287,27 +292,6 @@ function checkDomainStatus(items, opts) {
     .filter(r => typeof r === 'string' && r.startsWith('*.'))
     .map(r => r.substring(2));
 
-  const matchDomain = (domain, set) => {
-    if (!set || set.size === 0 || !domain) return false;
-    const tryMatch = (d) => {
-      if (set.has(d)) return true;
-      if (set.has('.' + d)) return true;
-      if (set.has('*.' + d)) return true;
-      return false;
-    };
-
-    const cleanDomain = domain.replace(/^www\./, '');
-    if (tryMatch(domain) || tryMatch(cleanDomain)) return true;
-
-    let p = domain.indexOf('.');
-    while (p !== -1) {
-      if (tryMatch(domain.substring(p + 1))) return true;
-      p = domain.indexOf('.', p + 1);
-    }
-
-    return false;
-  };
-
   const matchUserRules = (domain) => {
     if (matchDomain(domain, userRulesSet)) return true;
     if (!wildcardSuffixes.length) return false;
@@ -319,11 +303,10 @@ function checkDomainStatus(items, opts) {
   
   let text = i18n("popStatusDirect");
   let icon = "🛡️";
-  let isProxy = false;  // 用户规则命中
-  let isWhite = false;  // 白名单命中
+  let isProxy = false;
+  let isWhite = false;
   let statusClass = "status-direct";
 
-  // 优先级判断：白名单 > 临时 > 用户黑名单 > GFWList
   if (matchDomain(currentTabDomain, whitelistSet)) { 
     text = i18n("popStatusForceDirect"); 
     icon = "🛡️";
@@ -334,18 +317,18 @@ function checkDomainStatus(items, opts) {
     text = i18n("popStatusTemp"); 
     icon = "⏱️";
     isProxy = true; 
-    statusClass = "status-temp"; // 橙色
+    statusClass = "status-temp";
   }
   else if (matchUserRules(currentTabDomain)) { 
     text = i18n("popStatusForceProxy"); 
     icon = "🚀";
     isProxy = true; 
-    statusClass = "status-user"; // 紫色
+    statusClass = "status-user";
   }
   else if (!isLoading && matchDomain(currentTabDomain, gfwRulesSet)) { 
     text = i18n("popStatusGfw"); 
     icon = "🌏";
-    statusClass = "status-proxy"; // 绿色
+    statusClass = "status-proxy";
   } else if (isLoading) {
     text = i18n("statusNotLoaded");
     icon = "⏳";
@@ -360,52 +343,17 @@ function checkDomainStatus(items, opts) {
     wrapper.className = `domain-card ${statusClass}`;
   }
   
-  // 底部按钮逻辑
   if (isProxy || isWhite) {
-    // 已在手动规则中 -> 显示移除
     els.removeBtn.style.display = 'flex'; 
     els.addBtnGroup.style.display = 'none';
     els.removeBtn.onclick = () => removeDomainRule();
   } else {
-    // 未在手动规则中 -> 显示添加组
     els.removeBtn.style.display = 'none'; 
     els.addBtnGroup.style.display = 'flex';
     
-    // 绑定事件
     els.addRuleBtn.onclick = () => addRule('userRules');
     els.addTempRuleBtn.onclick = () => addRule('tempRules');
   }
-}
-
-function checkList(list, domain) {
-  if (!list || list.length === 0) return false;
-
-  const listSet = new Set(list.filter(Boolean));
-
-  const tryMatch = (d) => {
-    if (listSet.has(d)) return true;
-    if (listSet.has('.' + d)) return true;
-    if (listSet.has('*.' + d)) return true;
-    return false;
-  };
-
-  const cleanDomain = domain.replace(/^www\./, '');
-  if (tryMatch(domain) || tryMatch(cleanDomain)) return true;
-
-  let p = domain.indexOf('.');
-  while (p !== -1) {
-    if (tryMatch(domain.substring(p + 1))) return true;
-    p = domain.indexOf('.', p + 1);
-  }
-
-  for (const rule of listSet) {
-    if (rule.startsWith('*.')) {
-      const suffix = rule.substring(2);
-      if (domain === suffix || domain.endsWith('.' + suffix)) return true;
-    }
-  }
-
-  return false;
 }
 
 // 事件绑定

@@ -143,14 +143,14 @@
   "msgMoreRules": { "message": "... Показано первых %SHOWN%, осталось %REMAIN% — используйте поиск ..." },
   "msgNoRules": { "message": "Нет правил" },
   "msgGfwNetworkHint": { "message": "Возможна проблема с сетью. Попробуйте переключиться на зеркало (jsDelivr CDN / GitMirror) выше." },
-  "titleErrorLog": { "message": "Журнал ошибок" },
-  "txtErrorLogHint": { "message": "Только локально (до 100 записей). Без токенов и паролей. Копируйте при обращении в поддержку." },
-  "cbErrorLogVerbose": { "message": "Подробный журнал (вкл. отладку)" },
+  "titleErrorLog": { "message": "Диагностический журнал" },
+  "txtErrorLogHint": { "message": "Используйте для диагностики зависаний, отсутствия реакции и сбоев синхронизации. Только локально (макс. 500 записей). Токены, пароли и полные URL скрываются. Скопируйте при обращении в поддержку." },
+  "cbErrorLogVerbose": { "message": "Подробная диагностика (рекомендуется при обращении в поддержку)" },
   "btnCopyLogs": { "message": "📋 Копировать" },
   "btnClearLogs": { "message": "🗑️ Очистить" },
-  "phErrorLogEmpty": { "message": "Ошибок пока нет" },
+  "phErrorLogEmpty": { "message": "Пока нет записей" },
   "msgLogsCopied": { "message": "Журнал скопирован" },
   "msgLogsCopyFail": { "message": "Не удалось скопировать" },
   "msgLogsCleared": { "message": "Журнал очищен" },
-  "msgConfirmClearLogs": { "message": "Очистить весь журнал ошибок?" }
+  "msgConfirmClearLogs": { "message": "Очистить весь диагностический журнал?" }
 }

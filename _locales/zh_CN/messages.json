@@ -143,14 +143,14 @@
   "msgMoreRules": { "message": "... 已显示前 %SHOWN% 条，剩余 %REMAIN% 条请使用搜索查找 ..." },
   "msgNoRules": { "message": "暂无规则" },
   "msgGfwNetworkHint": { "message": "可能是网络问题，请尝试切换上方的镜像源（jsDelivr CDN / GitMirror）。" },
-  "titleErrorLog": { "message": "错误日志" },
-  "txtErrorLogHint": { "message": "仅保存在本机，最多 100 条。不含 Token、密码或完整 URL。反馈问题时可复制下方内容。" },
-  "cbErrorLogVerbose": { "message": "记录详细日志（含调试信息）" },
+  "titleErrorLog": { "message": "诊断日志" },
+  "txtErrorLogHint": { "message": "用于排查卡顿、无响应、同步失败等问题。仅保存在本机，最多 500 条；不含 Token、密码或完整 URL。反馈问题时点击“复制日志”发给开发者。" },
+  "cbErrorLogVerbose": { "message": "记录详细诊断（推荐排查时开启）" },
   "btnCopyLogs": { "message": "📋 复制日志" },
   "btnClearLogs": { "message": "🗑️ 清空" },
-  "phErrorLogEmpty": { "message": "暂无错误记录" },
+  "phErrorLogEmpty": { "message": "暂无诊断记录" },
   "msgLogsCopied": { "message": "日志已复制到剪贴板" },
   "msgLogsCopyFail": { "message": "复制失败，请手动复制" },
   "msgLogsCleared": { "message": "日志已清空" },
-  "msgConfirmClearLogs": { "message": "确定清空所有错误日志吗？" }
+  "msgConfirmClearLogs": { "message": "确定清空所有诊断日志吗？" }
 }

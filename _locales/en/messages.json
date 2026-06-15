@@ -143,14 +143,14 @@
   "msgMoreRules": { "message": "... Showing first %SHOWN%, %REMAIN% more - use search to find ..." },
   "msgNoRules": { "message": "No Rules" },
   "msgGfwNetworkHint": { "message": "This may be a network issue. Try switching to a mirror source (jsDelivr CDN / GitMirror) above." },
-  "titleErrorLog": { "message": "Error Log" },
-  "txtErrorLogHint": { "message": "Stored locally only (max 100 entries). Tokens, passwords, and full URLs are redacted. Copy when reporting issues." },
-  "cbErrorLogVerbose": { "message": "Verbose logging (include debug info)" },
+  "titleErrorLog": { "message": "Diagnostic Logs" },
+  "txtErrorLogHint": { "message": "Use this to troubleshoot freezes, unresponsive UI, and sync failures. Stored locally only (max 500 entries). Tokens, passwords, and full URLs are redacted. Copy and share when reporting issues." },
+  "cbErrorLogVerbose": { "message": "Record detailed diagnostics (recommended for troubleshooting)" },
   "btnCopyLogs": { "message": "📋 Copy Log" },
   "btnClearLogs": { "message": "🗑️ Clear" },
-  "phErrorLogEmpty": { "message": "No errors recorded yet" },
+  "phErrorLogEmpty": { "message": "No diagnostic records yet" },
   "msgLogsCopied": { "message": "Log copied to clipboard" },
   "msgLogsCopyFail": { "message": "Copy failed, please copy manually" },
   "msgLogsCleared": { "message": "Log cleared" },
-  "msgConfirmClearLogs": { "message": "Clear all error logs?" }
+  "msgConfirmClearLogs": { "message": "Clear all diagnostic logs?" }
 }

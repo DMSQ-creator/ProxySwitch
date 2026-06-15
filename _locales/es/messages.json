@@ -143,14 +143,14 @@
   "msgMoreRules": { "message": "... Mostrando primeras %SHOWN%, quedan %REMAIN% - usa búsqueda ..." },
   "msgNoRules": { "message": "Sin Reglas" },
   "msgGfwNetworkHint": { "message": "Puede ser un problema de red. Intenta cambiar a un mirror (jsDelivr CDN / GitMirror) arriba." },
-  "titleErrorLog": { "message": "Registro de errores" },
-  "txtErrorLogHint": { "message": "Solo local (máx. 100). Sin tokens ni contraseñas. Copia al reportar problemas." },
-  "cbErrorLogVerbose": { "message": "Registro detallado (incl. depuración)" },
+  "titleErrorLog": { "message": "Registro de diagnóstico" },
+  "txtErrorLogHint": { "message": "Úsalo para diagnosticar bloqueos, falta de respuesta y fallos de sincronización. Solo local (máx. 500). Tokens, contraseñas y URLs completas se ocultan. Copia al reportar problemas." },
+  "cbErrorLogVerbose": { "message": "Registrar diagnóstico detallado (recomendado)" },
   "btnCopyLogs": { "message": "📋 Copiar" },
   "btnClearLogs": { "message": "🗑️ Borrar" },
-  "phErrorLogEmpty": { "message": "Sin errores registrados" },
+  "phErrorLogEmpty": { "message": "Sin registros de diagnóstico" },
   "msgLogsCopied": { "message": "Registro copiado" },
   "msgLogsCopyFail": { "message": "Error al copiar" },
   "msgLogsCleared": { "message": "Registro borrado" },
-  "msgConfirmClearLogs": { "message": "¿Borrar todos los registros de error?" }
+  "msgConfirmClearLogs": { "message": "¿Borrar todos los registros de diagnóstico?" }
 }
