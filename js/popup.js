@@ -26,7 +26,7 @@ const els = {
 };
 
 let currentTabDomain = '';
-let currentMode = 'direct';
+let currentMode = null; // 🔥 Fix: 初始为 null 避免 UI 闪烁显示错误的"直连"高亮
 let customMessages = null;
 let currentTabLoading = false;
 let popupPort = null;

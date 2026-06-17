@@ -1,6 +1,16 @@
 // js/background.js - ProxySwitch
-importScripts('logger.js');
-importScripts('utils.js');
+// ⚠️ MV3 Service Worker 生命周期提醒：
+//   - Chrome 会在空闲 ~30s 后终止 SW，setTimeout/setInterval 会丢失。
+//   - 短延时（<30s）操作如 debounce(500ms)、图标更新(50ms) 在实际使用中通常能完成。
+//   - 长延时如 triggerAutoUpload(10s) 若 SW 在当前事件结束后快速终止可能会丢失，
+//     但这是 MV3 的已知限制，对用户无感知影响。
+//   - chrome.alarms 最小间隔 30+ 秒，不适用于本扩展的延时需求。
+try {
+  importScripts('logger.js');
+  importScripts('utils.js');
+} catch (e) {
+  console.error('[ProxySwitch] Failed to load core modules — extension may not work correctly', e);
+}
 
 self.addEventListener('error', (e) => {
   PSL.error('background', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
@@ -106,6 +116,10 @@ function buildPacScriptString(activeServer) {
   let port = parseInt(activeServer.port, 10);
   if (isNaN(port) || port < 1 || port > 65535) port = 1080;
   const scheme = (activeServer.scheme || 'SOCKS5').toUpperCase();
+  const SUPPORTED_SCHEMES = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'];
+  if (!SUPPORTED_SCHEMES.includes(scheme)) {
+    PSL.warn('background', `Unsupported proxy scheme "${scheme}", falling back to SOCKS5`);
+  }
   let pacProxyType = 'SOCKS5';
   if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = 'PROXY';
   else if (scheme === 'SOCKS4') pacProxyType = 'SOCKS';
@@ -214,14 +228,14 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   
   // 🔥 修复 Bug #1.1: 如果正在应用代理设置，跳过此次更新
   if (isApplyingProxy) {
-    console.log('[ProxySwitch] Skipping update: proxy application in progress');
+    PSL.info('background', 'Skipping storage update: proxy application in progress');
     return;
   }
   
   // 🔥 修复 Bug #1.2: 检查是否是 pacScriptData 的自我更新
   const changedKeys = Object.keys(changes);
   if (changedKeys.length === 1 && changedKeys[0] === 'pacScriptData') {
-    console.log('[ProxySwitch] Ignoring self-triggered pacScriptData update');
+    PSL.info('background', 'Ignoring self-triggered pacScriptData update');
     return;
   }
   
@@ -234,7 +248,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   const hasConfigChange = changedKeys.some(key => AUTO_UPDATE_KEYS.includes(key));
   
   if (hasConfigChange) {
-    console.log('[ProxySwitch] Config changed:', changedKeys);
+    PSL.info('background', 'Config changed', changedKeys.join(', '));
     debouncedUpdate();
     
     // 处理自动同步逻辑
@@ -330,9 +344,10 @@ function normalizeSet(list) {
     let prefix = "";
     if (raw.startsWith('*.')) { prefix = "*."; raw = raw.substring(2); } 
     else if (raw.startsWith('.')) { prefix = "."; raw = raw.substring(1); }
+    // 🔥 修复: IDN 域名转换前先剥离前缀，转换后再拼回
     if (/[^\x00-\x7F]/.test(raw)) {
       try { 
-        if (!raw.includes('*')) raw = new URL('http://' + raw).hostname; 
+        raw = new URL('http://' + raw).hostname; 
       } catch (e) { 
         PSL.warn('background', 'normalizeSet: IDN parse failed, keeping original', raw);
         // keep original raw value rather than silently dropping
@@ -556,7 +571,7 @@ async function performCloudUpload(){
     // 1. 获取本地数据
     const items = await chrome.storage.local.get(null);
     
-    // 2. 构造备份对象 (只备份核心配置)
+    // 2. 构造备份对象 (只备份核心配置；UI 偏好和同步元信息不纳入备份)
     const backupData = {
       userRules: items.userRules || [],
       userWhitelist: items.userWhitelist || [],
@@ -564,13 +579,9 @@ async function performCloudUpload(){
       serverList: items.serverList || [],
       activeServerId: items.activeServerId || '',
       gfwlistUrl: items.gfwlistUrl || '',
-      theme: items.theme || 'system',
-      appLanguage: items.appLanguage || 'auto',
-      autoSync: items.autoSync || false,
-      syncProvider: items.syncProvider || 'github',
 
       updatedAt: new Date().toISOString(),
-      backupVer: 4
+      backupVer: 5
     };
     
     // 3. 转换为格式化的 JSON 字符串 (方便用户阅读)
@@ -674,12 +685,17 @@ async function performCloudDownload(){
       const timeDisplay = new Date().toLocaleString();
       await chrome.storage.local.set({ lastSyncTime: timeDisplay });
       
-      // 3. 立即触发代理刷新（存储定时器引用，防止 SW 终止丢失）
-      if (uploadDebounceTimer) { clearTimeout(uploadDebounceTimer); uploadDebounceTimer = null; }
-      uploadDebounceTimer = setTimeout(() => {
-        uploadDebounceTimer = null;
-        updateCacheAndApply();
-      }, 200);
+      // 3. 仅在下载数据含代理相关键时才刷新 PAC，避免无意义重生成
+      const hasProxyKeys = Object.keys(safeData).some(k => 
+        ['userRules','userWhitelist','gfwDomains','tempRules','serverList','activeServerId'].includes(k)
+      );
+      if (hasProxyKeys) {
+        if (uploadDebounceTimer) { clearTimeout(uploadDebounceTimer); uploadDebounceTimer = null; }
+        uploadDebounceTimer = setTimeout(() => {
+          uploadDebounceTimer = null;
+          updateCacheAndApply();
+        }, 200);
+      }
       
       return timeDisplay;
     } else {
@@ -804,25 +820,24 @@ function handleGlobalIconUpdate(mode) {
   // 2. 设置全局默认图标 (给新标签页或未设置专用图标的标签页使用)
   setGlobalIcon(iconKey);
 
-  // 3. 【核心修复】强制更新当前激活标签页的图标
-  // 这一步是为了覆盖掉自动模式下可能闪留的 "Sticky" (Tab专用) 图标
-  chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-    if (tabs && tabs[0]) {
-      // 直接对当前 tabId 设置图标，确保它立即变化，不再显示旧的自动分流图标
-      if (iconDataCache[iconKey]) {
-        chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabs[0].id });
-        
-        // 可选：顺便更新一下鼠标悬停标题
-        let title = "ProxySwitch";
-        if (mode === 'fixed_servers') title = `ProxySwitch: ${i18n("popTitleGlobal")}`;
-        else if (mode === 'direct') title = `ProxySwitch: ${i18n("popTitleDirect")}`;
-        else if (mode === 'system') title = `ProxySwitch: ${i18n("popTitleSystem")}`;
-        else if (mode === 'pac_script') title = `ProxySwitch: ${i18n("popTitleAuto")}`;
-        
-        chrome.action.setTitle({ title: title, tabId: tabs[0].id });
+  // 3. 仅在非 PAC 模式下强制覆盖标签专用图标
+  //    PAC 模式下的标签图标由 updateTabIcon 按域名匹配单独管理，此处不应覆盖。
+  if (mode !== 'pac_script') {
+    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+      if (tabs && tabs[0]) {
+        if (iconDataCache[iconKey]) {
+          chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabs[0].id });
+          
+          let title = "ProxySwitch";
+          if (mode === 'fixed_servers') title = `ProxySwitch: ${i18n("popTitleGlobal")}`;
+          else if (mode === 'direct') title = `ProxySwitch: ${i18n("popTitleDirect")}`;
+          else if (mode === 'system') title = `ProxySwitch: ${i18n("popTitleSystem")}`;
+          
+          chrome.action.setTitle({ title: title, tabId: tabs[0].id });
+        }
       }
-    }
-  });
+    });
+  }
 }
 
 function getSafeHostname(urlStr) {
