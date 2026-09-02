@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <script src="../js/page-boot.js"></script>
   <title>__MSG_appName__</title>
   <style>
     :root {
@@ -120,9 +121,14 @@
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     ::-webkit-scrollbar-track { background: transparent; }
-    .log-viewer { width: 100%; height: 220px; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5; background: var(--bg-body); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; box-sizing: border-box; resize: vertical; }
+    .log-viewer { width: 100%; height: 300px; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5; background: var(--bg-body); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; box-sizing: border-box; resize: vertical; }
     .log-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
     .log-actions { display: flex; gap: 8px; }
+    .storage-readonly-warning { margin: 20px 28px 0; padding: 14px 18px; border: 1px solid rgba(239, 68, 68, 0.45); border-radius: var(--radius-sm); background: rgba(239, 68, 68, 0.1); color: var(--danger); font-size: 14px; font-weight: 600; line-height: 1.6; }
+    .storage-readonly-warning[hidden] { display: none; }
+    body.storage-readonly .menu-item:not([data-target="about"]) { opacity: 0.5; cursor: not-allowed; }
+    body.storage-readonly .section:not(#section-about) { pointer-events: none; opacity: 0.65; }
+    body.storage-readonly :disabled { cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -140,6 +146,7 @@
   </aside>
 
   <main class="app-main">
+    <div id="storageReadonlyWarning" class="storage-readonly-warning" role="alert" hidden></div>
     <div class="container">
       
       <!-- 服务器配置 -->
@@ -372,7 +379,7 @@
               <button type="button" id="clearErrorLogsBtn" class="btn btn-ghost btn-sm" style="color:var(--danger);">__MSG_btnClearLogs__</button>
             </div>
           </div>
-          <textarea id="errorLogBox" class="log-viewer" readonly placeholder="__MSG_phErrorLogEmpty__"></textarea>
+          <textarea id="errorLogBox" class="log-viewer" readonly spellcheck="false" placeholder="__MSG_phErrorLogEmpty__"></textarea>
         </div>
         <div class="card" style="border-color:rgba(239, 68, 68, 0.3);">
           <h3 style="color:var(--danger); margin-top:0;">__MSG_titleDanger__</h3>

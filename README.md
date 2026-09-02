@@ -24,7 +24,7 @@
 *   **☁️ 云端备份**：
     *   支持 **GitHub Gist** 备份（推荐，免费且稳定）。
     *   支持 **WebDAV** 备份（坚果云、Nextcloud 等）。
-    *   配置文件经过 Base64 混淆处理，保护隐私。
+    *   配置以可读 JSON 保存到您自己的私有 GitHub Gist 或 WebDAV；同步凭据不会写入备份，但配置文件不会被额外加密，请使用可信服务和 HTTPS。
 *   **⚡ 高级特性**：
     *   支持 SOCKS5 和 HTTP/HTTPS 代理协议。
     *   内置服务器延迟测试。
@@ -112,7 +112,7 @@ ProxySwitch/
 *   **☁️ Cloud Backup**:
     *   Supports **GitHub Gist** backup (Recommended).
     *   Supports **WebDAV** backup (Nextcloud, etc.).
-    *   Configuration files are obfuscated with Base64 for privacy.
+    *   Configurations are stored as readable JSON in your own private GitHub Gist or WebDAV service. Sync credentials are excluded, but the backup is not additionally encrypted; use a trusted service and HTTPS.
 *   **⚡ Advanced Features**:
     *   Supports SOCKS5 and HTTP/HTTPS protocols.
     *   Built-in server latency testing.

@@ -1,5 +1,7 @@
 // js/options.js
 
+PSL.checkpoint('options', 'options.script_entered', { readyState: document.readyState });
+
 const DEFAULT_GFWLIST_URL = 'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt';
 const LATENCY_TEST_URL = 'http://www.gstatic.com/generate_204';
 const MAX_DISPLAY_RULES = 500;
@@ -7,11 +9,20 @@ const MAX_DISPLAY_RULES = 500;
 let currentSection = 'server'; 
 let currentRuleType = 'userRules'; 
 let allData = {}; 
+let allDataAvailable = true;
+let diagnosticReadOnlyMode = false;
 let editingServerId = null;
 let customMessages = null; // 用于存储强制加载的语言包
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
+
+const DIAGNOSTIC_CONTROL_IDS = new Set([
+  'errorLogVerbose',
+  'copyErrorLogsBtn',
+  'clearErrorLogsBtn',
+  'errorLogBox',
+]);
 
 // --- 核心：智能 i18n 函数 ---
 // 如果加载了自定义语言包，优先使用；否则使用系统默认
@@ -22,13 +33,58 @@ const i18n = (key) => {
   return chrome.i18n.getMessage(key) || "";
 };
 
+function enterDiagnosticReadOnlyMode(reason) {
+  if (!diagnosticReadOnlyMode) {
+    PSL.warn('options', 'Configuration locked: storage unavailable', reason || 'unknown');
+  }
+  diagnosticReadOnlyMode = true;
+  allDataAvailable = false;
+
+  document.body.classList.add('storage-readonly');
+  const warning = $('#storageReadonlyWarning');
+  if (warning) {
+    warning.textContent = i18n('msgStorageReadOnlyMode') || 'Configuration storage is unavailable. Settings are locked to prevent data loss; only the diagnostic black box remains available.';
+    warning.hidden = false;
+  }
+
+  $$('button, input, select, textarea').forEach((control) => {
+    if (!DIAGNOSTIC_CONTROL_IDS.has(control.id)) {
+      control.disabled = true;
+      control.setAttribute('aria-disabled', 'true');
+    }
+  });
+
+  $$('.menu-item').forEach((item) => {
+    const isDiagnostics = item.dataset.target === 'about';
+    item.classList.toggle('active', isDiagnostics);
+    if (!isDiagnostics) item.setAttribute('aria-disabled', 'true');
+  });
+  $$('.section').forEach((section) => section.classList.toggle('active', section.id === 'section-about'));
+  currentSection = 'about';
+}
+
+function writeConfiguration(items, callback) {
+  if (diagnosticReadOnlyMode || !allDataAvailable) {
+    PSL.warn('options', 'Configuration write blocked', Object.keys(items || {}).join(',') || 'unknown');
+    showToast(i18n('msgStorageReadOnlyMode'));
+    return false;
+  }
+  chrome.storage.local.set(items, callback);
+  return true;
+}
+
 window.addEventListener('error', (e) => {
-  PSL.error('options', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
+  PSL.error('options', 'Uncaught error', e && e.error || {
+    message: e && e.message,
+    filename: e && e.filename,
+    line: e && e.lineno,
+    column: e && e.colno,
+  });
 });
 
 window.addEventListener('unhandledrejection', (e) => {
   const r = e && e.reason;
-  PSL.error('options', 'Unhandled rejection', r && (r.message || String(r)) || String(e));
+  PSL.error('options', 'Unhandled rejection', r || String(e));
 });
 
 function sendMessageWithTimeout(message, timeoutMs, label) {
@@ -59,6 +115,8 @@ function sendMessageWithTimeout(message, timeoutMs, label) {
 
 // --- 初始化入口 ---
 document.addEventListener('DOMContentLoaded', async () => {
+  const initStartedAt = Date.now();
+  PSL.checkpoint('options', 'options.dom_ready');
   // 1. 加载所有数据（包括语言设置）
   await loadAllData();
   
@@ -89,14 +147,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyTheme(allData.theme || 'system');
   
   initNav();
+  initLogModule();
+
+  if (!allDataAvailable) {
+    enterDiagnosticReadOnlyMode('initial storage read unavailable');
+    PSL.checkpoint('options', 'options.init_done', {
+      durationMs: Date.now() - initStartedAt,
+      diagnosticReadOnly: true,
+    });
+    return;
+  }
+
   initServerModule();
   initRuleModule();
   initGfwModule();
   initSyncModule();
   initGeneralModule(); // 这里会初始化语言下拉框
-  initLogModule();
   
   renderAll();
+  PSL.checkpoint('options', 'options.init_done', { durationMs: Date.now() - initStartedAt });
 });
 
 // --- 翻译函数 (保持之前的修复版) ---
@@ -149,11 +218,36 @@ function localizeHtmlPage() {
 async function loadAllData() {
   return new Promise(resolve => {
     const t0 = Date.now();
-    chrome.storage.local.get(null, (items) => {
-      PSL.perf('options', 'loadAllData storage.get', t0, null, 500);
-      allData = items;
-      resolve(items);
-    });
+    let finished = false;
+    const finish = (items, available = true) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      allData = items || {};
+      allDataAvailable = available;
+      if (!available) enterDiagnosticReadOnlyMode('loadAllData');
+      resolve(allData);
+    };
+    const timer = setTimeout(() => {
+      PSL.warn('options', 'loadAllData timeout', '1500ms');
+      finish({}, false);
+    }, 1500);
+
+    try {
+      chrome.storage.local.get(null, (items) => {
+        if (finished) return;
+        if (chrome.runtime.lastError) {
+          PSL.error('options', 'loadAllData failed', chrome.runtime.lastError.message);
+          finish({}, false);
+          return;
+        }
+        PSL.perf('options', 'loadAllData storage.get', t0, null, 500);
+        finish(items);
+      });
+    } catch (error) {
+      PSL.error('options', 'loadAllData API failed', error);
+      finish({}, false);
+    }
   });
 }
 
@@ -183,9 +277,13 @@ function renderAll() {
 function initNav() {
   $$('.menu-item').forEach(item => {
     item.addEventListener('click', () => {
+      const target = item.dataset.target;
+      if (diagnosticReadOnlyMode && target !== 'about') {
+        showToast(i18n('msgStorageReadOnlyMode'));
+        return;
+      }
       $$('.menu-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
-      const target = item.dataset.target;
       $$('.section').forEach(sec => sec.classList.remove('active'));
       $(`#section-${target}`).classList.add('active');
       currentSection = target;
@@ -245,11 +343,11 @@ function renderServerList() {
   let servers = allData.serverList || [];
   const activeId = allData.activeServerId;
 
-  if (servers.length === 0) {
+  if (servers.length === 0 && allDataAvailable) {
     const def = { id: 'default', name: 'Default', scheme: 'SOCKS5', host: '127.0.0.1', port: 10808 };
     allData.serverList = [def];
     allData.activeServerId = 'default';
-    chrome.storage.local.set({ serverList: [def], activeServerId: 'default' });
+    writeConfiguration({ serverList: [def], activeServerId: 'default' });
     servers = allData.serverList;
   }
 
@@ -276,7 +374,7 @@ function renderServerList() {
 function activateServer(id) {
   if (allData.activeServerId === id) return;
   allData.activeServerId = id;
-  chrome.storage.local.set({ activeServerId: id }, () => {
+  writeConfiguration({ activeServerId: id }, () => {
     renderServerList();
     showToast(i18n("msgSwitchServer"));
   });
@@ -341,7 +439,7 @@ function saveServer() {
     list.push(newSrv);
   }
   
-  chrome.storage.local.set({ serverList: list }, async () => {
+  writeConfiguration({ serverList: list }, async () => {
     await loadAllData(); 
     closeServerEdit();
     renderServerList();
@@ -355,7 +453,7 @@ function deleteServer(id) {
   let list = allData.serverList.filter(s => s.id !== id);
   if (list.length === 0) return alert(i18n("msgKeepOne"));
   if (allData.activeServerId === id) allData.activeServerId = list[0].id;
-  chrome.storage.local.set({ serverList: list, activeServerId: allData.activeServerId }, async () => {
+  writeConfiguration({ serverList: list, activeServerId: allData.activeServerId }, async () => {
     await loadAllData();
     renderServerList();
   });
@@ -369,7 +467,7 @@ function initRuleModule() {
   $('#ruleClearBtn').onclick = () => {
     if (confirm(i18n("msgConfirmClearRules"))) {
       const type = currentRuleType;
-      chrome.storage.local.set({ [type]: [] }, async () => { await loadAllData(); renderRuleList(); });
+      writeConfiguration({ [type]: [] }, async () => { await loadAllData(); renderRuleList(); });
     }
   };
   $('#ruleExportBtn').onclick = () => {
@@ -388,12 +486,16 @@ function initRuleModule() {
         if (Array.isArray(data)) {
           const type = currentRuleType;
           const merged = [...new Set([...(allData[type]||[]), ...data])];
-          chrome.storage.local.set({ [type]: merged }, async () => {
+          writeConfiguration({ [type]: merged }, async () => {
             await loadAllData(); renderRuleList(); showToast(i18n("msgImportCount").replace('%COUNT%', data.length));
           });
         } else alert(i18n("msgJsonErr"));
       } catch (e) {
-        PSL.error('options', 'Rule import parse failed', e.message);
+        // JSON parser messages may echo fragments of the imported rule file.
+        PSL.error('options', 'Rule import parse failed', {
+          errorName: e && e.name ? e.name : 'Error',
+          category: 'invalid-rule-json',
+        });
         alert(i18n("msgParseErr"));
       }
     };
@@ -491,7 +593,7 @@ function enableRuleEdit(div, oldDomain) {
         const idx = list.indexOf(oldDomain);
         if (idx !== -1) {
           list[idx] = newDomain;
-          chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); showToast(i18n("msgRuleModified")); });
+          writeConfiguration({ [type]: list }, async () => { await loadAllData(); renderRuleList(); showToast(i18n("msgRuleModified")); });
         }
       }
     } else renderRuleList();
@@ -521,7 +623,7 @@ function addRuleFromInput() {
     const conflictMsg = checkConflict(val);
     if (conflictMsg && !confirm(conflictMsg + i18n("msgConfirmConflict"))) return;
     list.push(val);
-    chrome.storage.local.set({ [type]: list }, async () => { 
+    writeConfiguration({ [type]: list }, async () => {
       await loadAllData(); 
       input.value = ''; 
       renderRuleList(); 
@@ -534,12 +636,12 @@ function deleteRule(domain) {
   const type = currentRuleType;
   let list = allData[type] || [];
   list = list.filter(d => d !== domain);
-  chrome.storage.local.set({ [type]: list }, async () => { await loadAllData(); renderRuleList(); });
+  writeConfiguration({ [type]: list }, async () => { await loadAllData(); renderRuleList(); });
 }
 
 function initGfwModule() {
   $('#gfwUrlInput').addEventListener('input', (e) => {
-    chrome.storage.local.set({ gfwlistUrl: e.target.value.trim() });
+    writeConfiguration({ gfwlistUrl: e.target.value.trim() });
   });
 
   if (allData.gfwlistUrl) {
@@ -553,7 +655,7 @@ function initGfwModule() {
     btn.onclick = () => {
       const url = btn.dataset.url;
       $('#gfwUrlInput').value = url;
-      chrome.storage.local.set({ gfwlistUrl: url });
+      writeConfiguration({ gfwlistUrl: url });
     };
   });
 
@@ -605,7 +707,7 @@ function initGfwModule() {
       const updateTime = new Date().toLocaleString();
       if (domainArray.length === 0) throw new Error("No domains parsed");
 
-      chrome.storage.local.set({
+      writeConfiguration({
         gfwDomains: domainArray,
         ruleCount: domainArray.length,
         lastUpdate: updateTime,
@@ -657,11 +759,12 @@ function updateGfwStatus(c, t) {
 
 function initSyncModule() {
   $('#syncProvider').onchange = updateSyncPanel;
-  $('#autoSync').onchange = () => chrome.storage.local.set({ autoSync: $('#autoSync').checked });
-  $('#gitToken').onchange = () => chrome.storage.local.set({ gitToken: $('#gitToken').value });
+  $('#autoSync').onchange = () => writeConfiguration({ autoSync: $('#autoSync').checked });
+  $('#gitToken').onchange = () => writeConfiguration({ gitToken: $('#gitToken').value });
   $('#davUrl').onchange = saveDav; $('#davUser').onchange = saveDav; $('#davPass').onchange = saveDav;
   
   $('#cloudUploadBtn').onclick = () => {
+    if (diagnosticReadOnlyMode || !allDataAvailable) return;
     showToast(i18n("msgUploading"));
     sendMessageWithTimeout({type: 'MANUAL_SYNC_UPLOAD'}, 30000, 'MANUAL_SYNC_UPLOAD').then(async (res) => {
        if (res && res.success) {
@@ -676,6 +779,7 @@ function initSyncModule() {
   };
   
   $('#cloudDownloadBtn').onclick = () => {
+    if (diagnosticReadOnlyMode || !allDataAvailable) return;
     if(!confirm(i18n("msgConfirmDownload"))) return;
     showToast(i18n("msgDownloadingBg"));
     sendMessageWithTimeout({type: 'MANUAL_SYNC_DOWNLOAD'}, 30000, 'MANUAL_SYNC_DOWNLOAD').then(async (res) => {
@@ -699,24 +803,28 @@ function updateSyncUI(time) {
 
 function updateSyncPanel() {
   const mode = $('#syncProvider').value;
+  renderSyncPanel(mode);
+  writeConfiguration({ syncProvider: mode });
+}
+
+function renderSyncPanel(mode) {
   $('#panelGithub').style.display = mode === 'github' ? 'block' : 'none';
   $('#panelWebdav').style.display = mode === 'webdav' ? 'block' : 'none';
-  chrome.storage.local.set({ syncProvider: mode });
 }
-function saveDav() { chrome.storage.local.set({ davUrl: $('#davUrl').value, davUser: $('#davUser').value, davPass: $('#davPass').value }); }
+function saveDav() { writeConfiguration({ davUrl: $('#davUrl').value, davUser: $('#davUser').value, davPass: $('#davPass').value }); }
 
-function switchSyncPanel() { updateSyncPanel(); } 
+function switchSyncPanel() { renderSyncPanel($('#syncProvider').value); }
 
 function initGeneralModule() {
   $('#themeSelect').value = allData.theme || 'system';
-  $('#themeSelect').onchange = (e) => { applyTheme(e.target.value); chrome.storage.local.set({ theme: e.target.value }); };
+  $('#themeSelect').onchange = (e) => { applyTheme(e.target.value); writeConfiguration({ theme: e.target.value }); };
   
   // --- 语言选择逻辑 ---
   const langSelect = document.getElementById('langSelect');
   if (langSelect) {
     langSelect.value = allData.appLanguage || 'auto';
     langSelect.onchange = (e) => {
-      chrome.storage.local.set({ appLanguage: e.target.value }, () => {
+      writeConfiguration({ appLanguage: e.target.value }, () => {
         // 重新加载页面以应用新语言
         window.location.reload();
       });
@@ -724,7 +832,9 @@ function initGeneralModule() {
   }
 
   $('#resetAppBtn').onclick = () => {
+    if (diagnosticReadOnlyMode || !allDataAvailable) return;
     if (confirm(i18n("msgConfirmReset"))) {
+      PSL.clearPageDiagnostics();
       chrome.storage.local.clear(() => {
         if (chrome.runtime.lastError) {
           alert(chrome.runtime.lastError.message);
@@ -751,24 +861,63 @@ function initLogModule() {
   const logBox = $('#errorLogBox');
   const verboseCb = $('#errorLogVerbose');
   if (!logBox || !verboseCb) return;
+  let refreshTimer = null;
+  let refreshRequestId = 0;
+  let refreshChain = Promise.resolve();
 
-  const refreshLogs = async () => {
-    const logs = await PSL.getLogs();
-    logBox.value = PSL.formatLogs(logs) || i18n('phErrorLogEmpty');
+  const refreshLogs = () => {
+    const requestId = ++refreshRequestId;
+    const task = refreshChain.then(async () => {
+      if (requestId !== refreshRequestId) return;
+      try {
+        const report = await PSL.getDiagnosticReport();
+        if (requestId === refreshRequestId) {
+          logBox.value = report || i18n('phErrorLogEmpty');
+        }
+      } catch (error) {
+        // Do not persist this failure: if diagnostic storage itself is unavailable,
+        // logging here would trigger storage.onChanged and create a refresh loop.
+        console.error('[ProxySwitch][blackbox] Report refresh failed', error);
+        if (requestId === refreshRequestId) logBox.value = i18n('phErrorLogEmpty');
+      }
+    });
+    refreshChain = task.catch(() => {});
+    return task;
+  };
+
+  const scheduleRefresh = () => {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      refreshLogs();
+    }, 120);
   };
 
   PSL.getVerbose().then((v) => { verboseCb.checked = v; });
   verboseCb.onchange = () => PSL.setVerbose(verboseCb.checked);
 
   $('#copyErrorLogsBtn').onclick = async () => {
+    const requestId = ++refreshRequestId;
+    let report;
     try {
-      await navigator.clipboard.writeText(logBox.value);
+      report = await PSL.getDiagnosticReport();
+    } catch (error) {
+      console.error('[ProxySwitch][blackbox] Report generation failed', error);
+      showToast(i18n('msgLogsCopyFail'));
+      return;
+    }
+    if (requestId === refreshRequestId) logBox.value = report || i18n('phErrorLogEmpty');
+
+    try {
+      await navigator.clipboard.writeText(report);
       showToast(i18n('msgLogsCopied'));
     } catch (e) {
       try {
+        logBox.value = report;
         logBox.select();
         const ok = document.execCommand('copy');
         showToast(ok ? i18n('msgLogsCopied') : i18n('msgLogsCopyFail'));
+        if (requestId !== refreshRequestId) scheduleRefresh();
       } catch (e2) {
         showToast(i18n('msgLogsCopyFail'));
       }
@@ -777,13 +926,21 @@ function initLogModule() {
 
   $('#clearErrorLogsBtn').onclick = async () => {
     if (!confirm(i18n('msgConfirmClearLogs'))) return;
-    await PSL.clearLogs();
-    await refreshLogs();
-    showToast(i18n('msgLogsCleared'));
+    try {
+      await PSL.clearLogs();
+      await refreshLogs();
+      showToast(i18n('msgLogsCleared'));
+    } catch (error) {
+      PSL.error('options', 'blackbox.clear_failed', error);
+      showToast(error && error.message ? error.message : i18n('msgLogsCopyFail'));
+    }
   };
 
   refreshLogs();
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.errorLogs) refreshLogs();
+    if (area === 'local' && PSL.isDiagnosticStorageChange(changes)) scheduleRefresh();
+  });
+  window.addEventListener('storage', (event) => {
+    if (PSL.isDiagnosticPageStorageKey(event.key)) scheduleRefresh();
   });
 }

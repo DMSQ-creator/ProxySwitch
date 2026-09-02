@@ -1,5 +1,7 @@
 // js/popup.js - ProxySwitch (i18n Version Fixed)
 
+PSL.checkpoint('popup', 'popup.script_entered', { readyState: document.readyState });
+
 const els = {
   serverSelect: document.getElementById('serverSelect'),
   
@@ -29,9 +31,11 @@ let currentTabDomain = '';
 let currentMode = null; // 🔥 Fix: 初始为 null 避免 UI 闪烁显示错误的"直连"高亮
 let customMessages = null;
 let currentTabLoading = false;
+let currentTabUrlKind = 'none';
 let popupPort = null;
 let initDone = false;
 let popupReloadTimer = null;
+let frameProbeScheduled = false;
 
 // --- 核心：智能 i18n 函数 ---
 const i18n = (key) => {
@@ -42,12 +46,21 @@ const i18n = (key) => {
 };
 
 window.addEventListener('error', (e) => {
-  PSL.error('popup', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
+  PSL.error('popup', 'Uncaught error', e && e.error || {
+    message: e && e.message,
+    filename: e && e.filename,
+    line: e && e.lineno,
+    column: e && e.colno,
+  });
 });
 
 window.addEventListener('unhandledrejection', (e) => {
   const r = e && e.reason;
-  PSL.error('popup', 'Unhandled rejection', r && (r.message || String(r)) || String(e));
+  PSL.error('popup', 'Unhandled rejection', r || String(e));
+});
+
+window.addEventListener('pagehide', () => {
+  PSL.checkpoint('popup', 'popup.pagehide');
 });
 
 function sendMessageWithTimeout(message, timeoutMs, label) {
@@ -79,22 +92,26 @@ function sendMessageWithTimeout(message, timeoutMs, label) {
 // --- 初始化流程 ---
 (async function init() {
   const t0 = Date.now();
-  PSL.info('popup', 'Init start');
+  PSL.checkpoint('popup', 'popup.init_started');
   const configPromise = loadBaseConfig();
   const timeoutPromise = new Promise(resolve => {
-    setTimeout(() => resolve(null), 3000);
+    setTimeout(() => resolve('timeout'), 3000);
   });
-  await Promise.race([configPromise, timeoutPromise]);
+  const configOutcome = await Promise.race([
+    configPromise.then(() => 'loaded'),
+    timeoutPromise,
+  ]);
+  PSL.checkpoint('popup', 'popup.config_race_done', { outcome: configOutcome });
   if (!initDone) {
     initDone = true;
     localizeHtmlPage();
     analyzeCurrentTab();
   }
-  PSL.perf('popup', 'Init done', t0, null, 300);
+  PSL.checkpoint('popup', 'popup.bootstrap_dispatched', { durationMs: Date.now() - t0 });
 })();
 
 
-// 监听配置变化（仅监听与 UI 相关的键，忽略 errorLogs 等高频写入项）
+// 监听配置变化（仅监听与 UI 相关的键，忽略黑匣子等诊断写入）
 const POPUP_RELEVANT_KEYS = ['serverList', 'activeServerId', 'userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'pacScriptData'];
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
@@ -114,6 +131,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function loadBaseConfig() {
   return new Promise(resolve => {
     chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage', 'pacScriptData'], async (items) => {
+      if (chrome.runtime.lastError) {
+        PSL.error('popup', 'base config storage.get failed', chrome.runtime.lastError.message);
+        items = {};
+      } else {
+        items = items || {};
+      }
       const userLang = items.appLanguage || 'auto';
       if (userLang !== 'auto') {
         loadLanguagePack(userLang);
@@ -180,19 +203,63 @@ async function loadLanguagePack(lang) {
   }
 }
 
+function classifyTabUrl(tab) {
+  const raw = tab && (tab.url || tab.pendingUrl);
+  if (!raw) return 'none';
+  try {
+    const protocol = new URL(raw).protocol;
+    if (protocol === 'http:' || protocol === 'https:') return protocol.slice(0, -1);
+    if (protocol === 'chrome-extension:') return 'extension';
+    return 'restricted-or-other';
+  } catch (_) {
+    return 'invalid';
+  }
+}
+
+function recordPopupUiState(pageKind) {
+  PSL.checkpoint('popup', 'popup.ui_state_applied', { pageKind: pageKind || currentTabUrlKind });
+  if (frameProbeScheduled || typeof requestAnimationFrame !== 'function') return;
+  frameProbeScheduled = true;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      PSL.checkpoint('popup', 'popup.frame_callback');
+    });
+  });
+}
+
 function analyzeCurrentTab() {
+  PSL.checkpoint('popup', 'popup.tabs_query_started');
   chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
     if (chrome.runtime.lastError) {
       PSL.error('popup', 'tabs.query failed', chrome.runtime.lastError.message);
       showInvalidPageUI();
+      recordPopupUiState('tabs-query-error');
       return;
     }
     const tab = tabs && tabs[0];
     currentTabLoading = !!(tab && tab.status === 'loading');
+    const tabUrlKind = classifyTabUrl(tab);
+    currentTabUrlKind = tabUrlKind;
+    PSL.checkpoint('popup', 'popup.tabs_query_done', {
+      loading: currentTabLoading,
+      tabUrlKind,
+    });
     if (!popupPort) {
       try {
         popupPort = chrome.runtime.connect({ name: 'popup' });
+        PSL.checkpoint('popup', 'popup.port_connected');
+        popupPort.onMessage.addListener((message) => {
+          if (!message || message.type !== 'POPUP_ACK') return;
+          PSL.checkpoint('popup', 'popup.background_ack', {
+            workerBootId: message.bootId ? String(message.bootId).slice(0, 12) : '',
+            workerReady: !!message.ready,
+          });
+        });
         popupPort.onDisconnect.addListener(() => {
+          const lastError = chrome.runtime.lastError;
+          PSL.checkpoint('popup', 'popup.port_disconnected', {
+            reason: lastError ? lastError.message : 'normal-or-page-close',
+          });
           popupPort = null;
         });
       } catch (e) {
@@ -200,7 +267,17 @@ function analyzeCurrentTab() {
       }
     }
     if (popupPort) {
-      popupPort.postMessage({ type: 'POPUP_OPEN', loading: currentTabLoading, tabUrl: tab && tab.url });
+      try {
+        popupPort.postMessage({
+          type: 'POPUP_OPEN',
+          loading: currentTabLoading,
+          tabUrlKind,
+          contextId: PSL.getContextId(),
+        });
+        PSL.checkpoint('popup', 'popup.open_posted', { loading: currentTabLoading, tabUrlKind });
+      } catch (error) {
+        PSL.error('popup', 'popup.open_send_failed', error);
+      }
     }
     
     let effectiveUrl = null;
@@ -225,9 +302,11 @@ function analyzeCurrentTab() {
         checkDomainStatusWrapper(currentTabLoading);
       } catch (e) {
         showInvalidPageUI();
+        recordPopupUiState('invalid');
       }
     } else {
       showInvalidPageUI();
+      recordPopupUiState(tabUrlKind);
     }
   });
 }
@@ -236,6 +315,7 @@ function checkDomainStatusWrapper(isLoading) {
   // 如果域名为空，不要去查 storage，直接显示无效 UI
   if (!currentTabDomain) {
     showInvalidPageUI();
+    recordPopupUiState('invalid');
     return;
   }
   if (isLoading) {
@@ -247,10 +327,18 @@ function checkDomainStatusWrapper(isLoading) {
     }
     if (els.addBtnGroup) els.addBtnGroup.style.display = 'none';
     if (els.removeBtn) els.removeBtn.style.display = 'none';
+    recordPopupUiState(currentTabUrlKind);
     return;
   }
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains'], (items) => {
-    checkDomainStatus(items, { loading: false });
+    if (chrome.runtime.lastError) {
+      PSL.error('popup', 'domain status storage.get failed', chrome.runtime.lastError.message);
+      showInvalidPageUI();
+      recordPopupUiState('storage-error');
+      return;
+    }
+    checkDomainStatus(items || {}, { loading: false });
+    recordPopupUiState(currentTabUrlKind);
   });
 }
 

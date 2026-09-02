@@ -5,20 +5,116 @@
 //   - 长延时如 triggerAutoUpload(10s) 若 SW 在当前事件结束后快速终止可能会丢失，
 //     但这是 MV3 的已知限制，对用户无感知影响。
 //   - chrome.alarms 最小间隔 30+ 秒，不适用于本扩展的延时需求。
+const ProxySwitchBootJournal = (() => {
+  const BOOT_PREFIX = '__psl_boot_v2__:';
+  const bootId = (() => {
+    try {
+      if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    } catch (_) {}
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  })();
+  const version = chrome.runtime.getManifest().version;
+  let sequence = 0;
+
+  function redactDetailText(value) {
+    let text = String(value || '');
+    text = text.replace(
+      /((?:Proxy-Authorization|Authorization|Set-Cookie|Cookie)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\r\n,}]+)/gi,
+      '$1***',
+    );
+    text = text.replace(/((?:password|pass|token|secret|cookie)["']?\s*[=:]\s*["']?)[^\s,;"'}]+/gi, '$1***');
+    text = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi, '[url]');
+    return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+  }
+
+  function safeDetail(detail) {
+    if (detail == null) return '';
+    try {
+      let text = typeof detail === 'string' ? detail : JSON.stringify(detail, (key, value) =>
+        /(?:password|pass|token|authorization|secret|cookie)/i.test(key) ? '***' : value
+      );
+      return redactDetailText(text);
+    } catch (_) {
+      return redactDetailText(detail);
+    }
+  }
+
+  function mark(phase, detail) {
+    sequence += 1;
+    const createdAtMs = Date.now();
+    const record = {
+      schemaVersion: 2,
+      bootId,
+      sequence,
+      phase,
+      detail: safeDetail(detail) || undefined,
+      createdAtMs,
+      createdAt: new Date(createdAtMs).toISOString(),
+      version,
+    };
+    const key = `${BOOT_PREFIX}${bootId}:${String(sequence).padStart(2, '0')}:${phase}`;
+    const write = () => {
+      try {
+        return Promise.resolve(chrome.storage.local.set({ [key]: record }))
+          .then(() => true)
+          .catch((error) => {
+            // This recorder cannot use PSL: a storage failure must never recurse into itself.
+            console.error('[ProxySwitch][boot-journal] Phase write failed', phase, error);
+            return false;
+          });
+      } catch (error) {
+        // The black box must never become the reason the worker fails to start.
+        console.error('[ProxySwitch][boot-journal] Phase write API failed', phase, error);
+        return Promise.resolve(false);
+      }
+    };
+
+    // Each phase has a unique key, so issue it immediately. Promise chaining here
+    // would postpone later calls until top-level evaluation ends and would lose the
+    // exact last phase when that evaluation hard-hangs.
+    return write();
+  }
+
+  return { id: bootId, mark };
+})();
+
+ProxySwitchBootJournal.mark('script_entered');
+
+let coreModulesReady = false;
 try {
   importScripts('logger.js');
   importScripts('utils.js');
+  coreModulesReady = true;
 } catch (e) {
   console.error('[ProxySwitch] Failed to load core modules — extension may not work correctly', e);
 }
 
+let iconDataReady = false;
+try {
+  importScripts('icon-data.js');
+  iconDataReady = !!self.ProxySwitchIconData;
+} catch (e) {
+  console.error('[ProxySwitch] Failed to load static icon data', e);
+}
+
+ProxySwitchBootJournal.mark('imports_completed', { coreModulesReady, iconDataReady });
+if (!coreModulesReady || typeof PSL === 'undefined') {
+  throw new Error('ProxySwitch core modules failed to load; see the worker boot journal');
+}
+PSL.setBootId(ProxySwitchBootJournal.id);
+
 self.addEventListener('error', (e) => {
-  PSL.error('background', 'Uncaught error', e && (e.message || e.error && e.error.message) || String(e));
+  PSL.error('background', 'Uncaught error', e && (e.error || {
+    message: e.message,
+    filename: e.filename,
+    line: e.lineno,
+    column: e.colno,
+  }) || String(e));
 });
 
 self.addEventListener('unhandledrejection', (e) => {
   const r = e && e.reason;
-  PSL.error('background', 'Unhandled rejection', r && (r.message || String(r)) || String(e));
+  PSL.error('background', 'Unhandled rejection', r || String(e));
 });
 
 // ===== 全局变量 =====
@@ -37,8 +133,9 @@ let pacUpdateVersion = 0;
 let uploadDebounceTimer = null;
 let debouncedUpdateTimer = null;
 
-// 图标数据缓存 (Key: StateString -> Value: ImageData)
-let iconDataCache = {};
+// 图标像素在构建时生成。运行时只构造 ImageData，不触发 Canvas/GPU 读回。
+const STATIC_ICON_SIZES = Object.freeze([16, 32]);
+const staticIconImageDataCache = new Map();
 let currentProxyMode = 'direct';
 
 // 🔥 修复 Bug #2: 竞态条件防护
@@ -208,8 +305,6 @@ chrome.runtime.onInstalled.addListener(async (d) => {
     }
     chrome.runtime.openOptionsPage();
   }
-  // 初始化预渲染图标
-  await preloadAllIcons();
   updateCacheAndApply();
 });
 
@@ -225,38 +320,26 @@ const AUTO_UPDATE_KEYS = [
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace !== 'local') return;
+
+  const changedKeys = Object.keys(changes);
+  const hasConfigChange = changedKeys.some(key => AUTO_UPDATE_KEYS.includes(key));
+  // Diagnostic records and unrelated settings must not enter proxy-update logic or create log recursion.
+  if (!hasConfigChange) return;
   
   // 🔥 修复 Bug #1.1: 如果正在应用代理设置，跳过此次更新
   if (isApplyingProxy) {
     PSL.info('background', 'Skipping storage update: proxy application in progress');
     return;
   }
+
+  PSL.info('background', 'Config changed', changedKeys.join(', '));
+  debouncedUpdate();
   
-  // 🔥 修复 Bug #1.2: 检查是否是 pacScriptData 的自我更新
-  const changedKeys = Object.keys(changes);
-  if (changedKeys.length === 1 && changedKeys[0] === 'pacScriptData') {
-    PSL.info('background', 'Ignoring self-triggered pacScriptData update');
-    return;
-  }
-  
-  // 如果是 pacVersion 或 pacHash 的单独更新，也忽略
-  if (changedKeys.length === 1 && (changedKeys[0] === 'pacVersion' || changedKeys[0] === 'pacHash')) {
-    return;
-  }
-  
-  // 🔥 修复 Bug #1.3: 只处理配置变化
-  const hasConfigChange = changedKeys.some(key => AUTO_UPDATE_KEYS.includes(key));
-  
-  if (hasConfigChange) {
-    PSL.info('background', 'Config changed', changedKeys.join(', '));
-    debouncedUpdate();
-    
-    // 处理自动同步逻辑
-    if (!isSyncing && (changes.userRules || changes.userWhitelist || changes.serverList)) {
-      chrome.storage.local.get(['autoSync'], (s) => { 
-        if (s.autoSync) triggerAutoUpload(); 
-      });
-    }
+  // 处理自动同步逻辑
+  if (!isSyncing && (changes.userRules || changes.userWhitelist || changes.serverList)) {
+    chrome.storage.local.get(['autoSync'], (s) => {
+      if (s.autoSync) triggerAutoUpload();
+    });
   }
 });
 
@@ -308,8 +391,12 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
     performCloudDownload()
       .then(t => sendResponse({success:true, time:t}))
       .catch(e => {
-        PSL.error('background', 'Manual sync download failed', e.message);
-        sendResponse({success:false, error:e.message});
+        // SyntaxError messages from response.json() may echo remote config content.
+        const safeMessage = e && e.name === 'SyntaxError'
+          ? 'Remote configuration is not valid JSON'
+          : (e && e.message) || 'Unknown';
+        PSL.error('background', 'Manual sync download failed', safeMessage);
+        sendResponse({success:false, error:safeMessage});
       });
     return true; 
   }
@@ -318,22 +405,33 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (!port || port.name !== 'popup') return;
   const t0 = Date.now();
-  PSL.info('background', 'Popup port connected');
+  PSL.checkpoint('background', 'popup.port_connected');
   port.onMessage.addListener((msg) => {
     if (!msg) return;
     if (msg.type === 'POPUP_OPEN') {
-      const d = `loading=${!!msg.loading}${msg.tabUrl ? ` tabUrl=${msg.tabUrl}` : ''}`;
-      PSL.info('background', 'Popup open', d);
+      const allowedKinds = new Set(['none', 'http', 'https', 'extension', 'restricted-or-other', 'invalid']);
+      const tabUrlKind = allowedKinds.has(msg.tabUrlKind) ? msg.tabUrlKind : 'unknown';
+      PSL.checkpoint('background', 'popup.open_received', {
+        popupContextId: msg.contextId || '',
+        loading: !!msg.loading,
+        tabUrlKind,
+      });
+      try {
+        port.postMessage({
+          type: 'POPUP_ACK',
+          bootId: ProxySwitchBootJournal.id,
+          ready: initReadyResolver === null,
+        });
+      } catch (error) {
+        PSL.warn('background', 'popup.ack_failed', error);
+      }
     }
   });
   port.onDisconnect.addListener(() => {
     PSL.perf('background', 'Popup session', t0, null, 500);
-    PSL.info('background', 'Popup port disconnected');
+    PSL.checkpoint('background', 'popup.port_disconnected', { durationMs: Date.now() - t0 });
   });
 });
-
-// 启动时预渲染
-preloadAllIcons().then(updateCacheAndApply);
 
 // ===== 核心逻辑 =====
 function normalizeSet(list) {
@@ -349,7 +447,10 @@ function normalizeSet(list) {
       try { 
         raw = new URL('http://' + raw).hostname; 
       } catch (e) { 
-        PSL.warn('background', 'normalizeSet: IDN parse failed, keeping original', raw);
+        PSL.warn('background', 'normalizeSet: IDN parse failed, keeping original', {
+          inputLength: raw.length,
+          nonAscii: true,
+        });
         // keep original raw value rather than silently dropping
       }
     }
@@ -403,24 +504,33 @@ function refreshCacheAndIcon(done) {
   });
 }
 
-function updateCacheAndApply(specificTabId, specificUrl, _retries) {
+function updateCacheAndApply(specificTabId, specificUrl, _retries, traceBoot) {
   if (isApplyingProxy) {
     const retries = (_retries || 0) + 1;
     if (retries > 20) {
       PSL.warn('background', 'updateCacheAndApply timeout, forcing unlock');
       isApplyingProxy = false;
     } else {
-      setTimeout(() => updateCacheAndApply(specificTabId, specificUrl, retries), 100);
+      setTimeout(() => updateCacheAndApply(specificTabId, specificUrl, retries, traceBoot), 100);
       return;
     }
   }
   
   chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
+    if (traceBoot) ProxySwitchBootJournal.mark('initial_storage_get_returned');
     // 1. 更新内存缓存
     cachedUserRules = normalizeSet(items.userRules);
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
     cachedTempRules = normalizeSet(items.tempRules);
+    if (traceBoot) {
+      ProxySwitchBootJournal.mark('initial_cache_built', {
+        userRules: cachedUserRules.size,
+        whitelist: cachedUserWhitelist.size,
+        gfw: cachedGfwDomains.size,
+        tempRules: cachedTempRules.size,
+      });
+    }
     
     // 🔥 修复: 初始化哈希值（首次运行时）
     if (!lastPacHash && items.pacHash) {
@@ -430,12 +540,8 @@ function updateCacheAndApply(specificTabId, specificUrl, _retries) {
     // 2. 应用设置 (生成 PAC 并注入)
     applyProxySettings(items, () => {
       // 3. 设置应用完毕后的回调
-      if (initReadyResolver) {
-        initReadyResolver();
-        initReadyResolver = null;
-      }
-      
       // 4. 更新图标
+      if (traceBoot) ProxySwitchBootJournal.mark('initial_active_icon_entered');
       if (specificTabId && specificUrl) {
         // 针对性更新（来自 Popup 的操作）
         updateTabIcon(specificTabId, specificUrl);
@@ -443,29 +549,47 @@ function updateCacheAndApply(specificTabId, specificUrl, _retries) {
         // 常规更新
         updateIconForActiveTab();
       }
-    });
+      if (traceBoot) ProxySwitchBootJournal.mark('initial_active_icon_returned');
+
+      if (initReadyResolver) {
+        initReadyResolver();
+        initReadyResolver = null;
+      }
+    }, traceBoot);
   });
 }
 
-function applyProxySettings(items, callback) {
+function applyProxySettings(items, callback, traceBoot) {
   const activeServer = resolveActiveServer(items);
+  if (traceBoot) ProxySwitchBootJournal.mark('initial_pac_build_entered');
   const pacScriptStr = buildPacScriptString(activeServer);
+  if (traceBoot) ProxySwitchBootJournal.mark('initial_pac_build_returned', { pacLength: pacScriptStr.length });
 
   persistPacScriptIfNeeded(items, pacScriptStr, () => {
+    if (traceBoot) ProxySwitchBootJournal.mark('initial_pac_persist_returned');
     doApplyProxyConfig(callback);
   });
 
   function doApplyProxyConfig(cb) {
+    if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_get_dispatched');
     chrome.proxy.settings.get({}, (d) => {
       const mode = (d && d.value) ? d.value.mode : 'direct';
       currentProxyMode = mode;
+      if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_get_returned', { mode });
+      if (traceBoot) ProxySwitchBootJournal.mark('initial_global_icon_entered', { mode });
       handleGlobalIconUpdate(mode);
+      if (traceBoot) ProxySwitchBootJournal.mark('initial_global_icon_returned', { mode });
 
       if (mode === 'pac_script' && pacScriptStr) {
+        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_dispatched', { mode });
         chrome.proxy.settings.set({
           value: { mode: "pac_script", pacScript: { data: pacScriptStr } },
           scope: 'regular'
         }, () => {
+          if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_returned', {
+            mode,
+            success: !chrome.runtime.lastError,
+          });
           if (chrome.runtime.lastError) {
             PSL.error('background', 'PAC proxy apply failed', chrome.runtime.lastError.message);
           } else {
@@ -475,15 +599,21 @@ function applyProxySettings(items, callback) {
         });
       } else if (mode === 'pac_script' && !pacScriptStr) {
         PSL.warn('background', 'PAC mode but no active server, falling back to direct');
+        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_dispatched', { mode: 'direct-fallback' });
         chrome.proxy.settings.set({
           value: { mode: "direct" },
           scope: 'regular'
         }, () => {
+          if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_returned', {
+            mode: 'direct-fallback',
+            success: !chrome.runtime.lastError,
+          });
           currentProxyMode = 'direct';
           handleGlobalIconUpdate('direct');
           if (cb) cb();
         });
       } else if (mode === 'fixed_servers' && activeServer) {
+        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_dispatched', { mode });
         chrome.proxy.settings.set({
           value: {
             mode: "fixed_servers",
@@ -497,6 +627,10 @@ function applyProxySettings(items, callback) {
           },
           scope: 'regular'
         }, () => {
+          if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_returned', {
+            mode,
+            success: !chrome.runtime.lastError,
+          });
           if (chrome.runtime.lastError) {
             PSL.error('background', 'Fixed proxy apply failed', chrome.runtime.lastError.message);
           } else {
@@ -505,6 +639,7 @@ function applyProxySettings(items, callback) {
           if (cb) cb();
         });
       } else {
+        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_skipped', { mode });
         if (cb) cb();
       }
     });
@@ -746,60 +881,66 @@ async function ghFetch(url, method, token, body) {
 }
 
 // ===== 图标管理模块 =====
-async function preloadAllIcons() {
-  const configs = [
-    { key: 'fixed',    c: "#8b5cf6", t: "G" }, 
-    { key: 'direct',   c: "#0ea5e9", t: "D" }, 
-    { key: 'system',   c: "#64748b", t: "S" }, 
-    { key: 'pac_gray', c: "#94a3b8", t: "A" }, 
-    { key: 'pac_green',c: "#10b981", t: "A" }, 
-    { key: 'pac_blue', c: "#0ea5e9", t: "W" }, 
-    { key: 'pac_org',  c: "#f59e0b", t: "T" }, 
-    { key: 'pac_purp', c: "#8b5cf6", t: "M" } 
-  ];
-  
-  for (const cfg of configs) {
-    iconDataCache[cfg.key] = createIconImageData(cfg.c, cfg.t);
+function getStaticIconImageData(key, size) {
+  const iconData = self.ProxySwitchIconData;
+  const resolvedKey = iconData && iconData[key] ? key : 'direct';
+  const encoded = iconData && iconData[resolvedKey] && iconData[resolvedKey][size];
+  if (!encoded || typeof ImageData === 'undefined') return null;
+
+  const cacheKey = `${resolvedKey}:${size}`;
+  if (staticIconImageDataCache.has(cacheKey)) {
+    return staticIconImageDataCache.get(cacheKey);
+  }
+
+  try {
+    const binary = atob(encoded);
+    const expectedLength = size * size * 4;
+    if (binary.length !== expectedLength) {
+      throw new Error(`invalid RGBA length ${binary.length}, expected ${expectedLength}`);
+    }
+
+    const pixels = new Uint8ClampedArray(expectedLength);
+    for (let i = 0; i < expectedLength; i++) {
+      pixels[i] = binary.charCodeAt(i);
+    }
+
+    const imageData = new ImageData(pixels, size, size);
+    staticIconImageDataCache.set(cacheKey, imageData);
+    return imageData;
+  } catch (e) {
+    PSL.warn('background', 'Static icon decode failed', `${resolvedKey}/${size}: ${e.message}`);
+    return null;
   }
 }
 
-function createIconImageData(color, text) {
-  if (typeof OffscreenCanvas === 'undefined') {
-    PSL.warn('background', 'OffscreenCanvas not available, icon rendering skipped');
-    return null;
+function getStaticIconSet(key) {
+  const imageData = {};
+  for (const size of STATIC_ICON_SIZES) {
+    const icon = getStaticIconImageData(key, size);
+    if (icon) imageData[size] = icon;
   }
-  const c = new OffscreenCanvas(32, 32);
-  const ctx = c.getContext('2d');
-  const radius = 8; 
-  
-  ctx.clearRect(0, 0, 32, 32);
-  ctx.fillStyle = color; 
-  ctx.beginPath();
-  ctx.moveTo(radius, 0);
-  ctx.lineTo(32 - radius, 0);
-  ctx.quadraticCurveTo(32, 0, 32, radius);
-  ctx.lineTo(32, 32 - radius);
-  ctx.quadraticCurveTo(32, 32, 32 - radius, 32);
-  ctx.lineTo(radius, 32);
-  ctx.quadraticCurveTo(0, 32, 0, 32 - radius);
-  ctx.lineTo(0, radius);
-  ctx.quadraticCurveTo(0, 0, radius, 0);
-  ctx.closePath();
-  ctx.fill();
+  return Object.keys(imageData).length ? imageData : null;
+}
 
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, 16, 17);
+function setActionIcon(key, tabId) {
+  const imageData = getStaticIconSet(key);
+  if (!imageData) {
+    PSL.warn('background', 'Static icon unavailable', key);
+    return;
+  }
 
-  return ctx.getImageData(0,0,32,32);
+  const details = { imageData };
+  if (Number.isInteger(tabId)) details.tabId = tabId;
+
+  chrome.action.setIcon(details, () => {
+    if (chrome.runtime.lastError) {
+      PSL.warn('background', 'Icon update failed', chrome.runtime.lastError.message);
+    }
+  });
 }
 
 function setGlobalIcon(key) {
-  if (iconDataCache[key]) {
-    chrome.action.setIcon({ imageData: iconDataCache[key] });
-  }
+  setActionIcon(key);
 }
 
 function handleGlobalIconUpdate(mode) {
@@ -825,16 +966,14 @@ function handleGlobalIconUpdate(mode) {
   if (mode !== 'pac_script') {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
       if (tabs && tabs[0]) {
-        if (iconDataCache[iconKey]) {
-          chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabs[0].id });
-          
-          let title = "ProxySwitch";
-          if (mode === 'fixed_servers') title = `ProxySwitch: ${i18n("popTitleGlobal")}`;
-          else if (mode === 'direct') title = `ProxySwitch: ${i18n("popTitleDirect")}`;
-          else if (mode === 'system') title = `ProxySwitch: ${i18n("popTitleSystem")}`;
-          
-          chrome.action.setTitle({ title: title, tabId: tabs[0].id });
-        }
+        setActionIcon(iconKey, tabs[0].id);
+
+        let title = "ProxySwitch";
+        if (mode === 'fixed_servers') title = `ProxySwitch: ${i18n("popTitleGlobal")}`;
+        else if (mode === 'direct') title = `ProxySwitch: ${i18n("popTitleDirect")}`;
+        else if (mode === 'system') title = `ProxySwitch: ${i18n("popTitleSystem")}`;
+
+        chrome.action.setTitle({ title: title, tabId: tabs[0].id });
       }
     });
   }
@@ -900,10 +1039,8 @@ function updateTabIcon(tabId, url) {
       
       // 🔥 关键修复: 验证 URL 是否仍然匹配
       if (tab && tab.url === url) {
-        if (iconDataCache[iconKey]) {
-          chrome.action.setIcon({ imageData: iconDataCache[iconKey], tabId: tabId });
-          chrome.action.setTitle({ title: `ProxySwitch: ${title}`, tabId: tabId });
-        }
+        setActionIcon(iconKey, tabId);
+        chrome.action.setTitle({ title: `ProxySwitch: ${title}`, tabId: tabId });
       }
     });
   }, 50); // 短暂延迟，避免快速切换时的闪烁
@@ -978,4 +1115,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     clearTimeout(pendingIconUpdates.get(tabId));
     pendingIconUpdates.delete(tabId);
   }
+});
+
+// All extension listeners are now registered synchronously. Business initialization starts afterwards.
+ProxySwitchBootJournal.mark('listeners_registered');
+ProxySwitchBootJournal.mark('initialization_dispatching');
+updateCacheAndApply(undefined, undefined, undefined, true);
+ProxySwitchBootJournal.mark('initialization_dispatched');
+initPromise.then(async () => {
+  await ProxySwitchBootJournal.mark('ready', { proxyMode: currentProxyMode });
+  PSL.checkpoint('background', 'worker.ready', { proxyMode: currentProxyMode });
+  await PSL.prune();
 });

@@ -1,6 +1,6 @@
 # Privacy Policy (隐私权政策)
 
-**Last Updated:** December 24, 2025
+**Last Updated:** September 2, 2026
 
 ## <span id="cn">中文版 (Chinese Version)</span>
 
@@ -18,6 +18,8 @@
     *   **此类数据绝不会离开您的浏览器**，也不会发送给我们或任何第三方用于追踪目的。
 *   **代理配置与规则：**
     *   您的服务器列表、自定义规则（黑/白名单）及设置均存储在您浏览器的**本地存储** (`chrome.storage.local`) 中。
+*   **故障诊断记录：**
+    *   “故障黑匣子”仅在本地保存有限数量的运行状态和启动记录。报告不包含规则或 PAC 正文，并会隐藏密码、Token 和完整网页 URL；诊断记录不会被自动上传。
 *   **认证令牌（云端备份）：**
     *   如果您使用“云端备份”功能，您的 GitHub Token 或 WebDAV 账号密码仅保存在您的浏览器本地。它们**仅**用于与您选择的服务提供商进行身份验证。我们无法获取这些凭据。
 
@@ -25,7 +27,7 @@
 
 本扩展程序包含“云端备份”功能，允许您跨设备同步配置。这是一个**可选**功能。
 
-*   **GitHub Gist / WebDAV：** 如果您选择使用此功能，您的配置数据（经过编码处理）将直接从您的浏览器传输到**您自己的** GitHub Gist 或 WebDAV 服务器。
+*   **GitHub Gist / WebDAV：** 如果您选择使用此功能，服务器列表、规则等配置将以**可读 JSON**直接从您的浏览器传输到**您自己的** GitHub Gist 或 WebDAV 服务器。同步凭据不会写入备份，但本扩展不会对备份文件进行额外加密或 Base64 编码。
 *   **无中间商：** 此传输过程是点对点的，不经过 ProxySwitch 开发者的任何服务器。
 
 ### 4. 权限使用说明
@@ -47,7 +49,7 @@
 
 ### 6. 数据安全
 
-由于我们不收集您的数据，因此不存在数据从我们服务器泄露的风险。对于存储在本地或云端账户中的数据，我们在适用的情况下使用标准编码（Base64）对配置文件进行混淆处理。
+我们不通过自己的服务器收集或中转您的配置。云备份是可读 JSON，其安全性取决于您选择的服务、访问权限和传输方式；请使用私有 Gist 或受保护的 WebDAV，并优先使用 HTTPS。
 
 ### 7. 政策变更
 
@@ -77,6 +79,8 @@ We do not collect any Personal Identifiable Information (PII). Here is a breakdo
     *   **This data never leaves your browser** and is never sent to us or any third parties for tracking purposes.
 *   **Proxy Configurations & Rules:**
     *   Your server lists, custom rules (user rules/whitelists), and settings are stored in your browser's **Local Storage** (`chrome.storage.local`).
+*   **Fault Diagnostics:**
+    *   The Fault Black Box locally retains a limited number of runtime-state and startup records. Reports exclude rule and PAC contents and redact passwords, tokens, and full page URLs. Diagnostic records are never uploaded automatically.
 *   **Authentication Tokens (Cloud Backup):**
     *   If you use the "Cloud Backup" feature, your GitHub Token or WebDAV credentials are saved locally in your browser. They are used **strictly** to authenticate with the service provider you chose. We do not have access to these credentials.
 
@@ -84,7 +88,7 @@ We do not collect any Personal Identifiable Information (PII). Here is a breakdo
 
 The extension includes a "Cloud Backup" feature that allows you to sync your configurations across devices. This is an **optional** feature.
 
-*   **GitHub Gist / WebDAV:** If you choose to use this feature, your configuration data (which is encoded) is transmitted directly from your browser to **your own** GitHub Gist or WebDAV server.
+*   **GitHub Gist / WebDAV:** If you choose to use this feature, configuration such as server lists and rules is transmitted as **readable JSON** directly from your browser to **your own** GitHub Gist or WebDAV server. Sync credentials are excluded from the backup, but the extension does not additionally encrypt or Base64-encode the backup file.
 *   **No Intermediary:** This transmission occurs directly. Does not pass through any servers owned by ProxySwitch developers.
 
 ### 4. Permissions Usage
@@ -106,7 +110,7 @@ We request the minimum permissions necessary for the extension to function:
 
 ### 6. Data Security
 
-Since we do not collect your data, there is no risk of your data being breached from our servers. For data stored locally or on your cloud accounts, we use standard encryption or encoding (Base64) where applicable to obfuscate the configuration files.
+We do not collect or relay your configuration through our own servers. Cloud backups are readable JSON, so their security depends on your chosen provider, access controls, and transport. Use a private Gist or protected WebDAV service and prefer HTTPS.
 
 ### 7. Changes to This Policy
 
