@@ -21,6 +21,7 @@
     *   **GFWList 支持**：一键订阅并更新 GFWList 规则。
     *   **自动识别**：根据域名自动判断走代理还是直连。
     *   **黑白名单**：支持自定义强制代理域名（黑名单）和强制直连域名（白名单）。
+    *   **本站直连**：在弹窗一键将当前域名及其子域名加入白名单，加载中的网页也可操作；支持撤销，保留原有代理规则。白名单仅在自动分流模式下生效。
 *   **☁️ 云端备份**：
     *   支持 **GitHub Gist** 备份（推荐，免费且稳定）。
     *   支持 **WebDAV** 备份（坚果云、Nextcloud 等）。
@@ -109,6 +110,7 @@ ProxySwitch/
     *   **GFWList Support**: Subscribe to and update GFWList rules with one click.
     *   **Auto Detection**: Automatically decides whether to proxy or connect directly based on the domain.
     *   **Black/White Lists**: Support for custom user rules (blacklist for forced proxy, whitelist for forced direct).
+    *   **Direct for This Site**: Add the current hostname and its subdomains to the direct list from the popup, even while a page is loading. Undo removes the entry while keeping existing proxy rules. Direct-list rules apply only in Auto mode.
 *   **☁️ Cloud Backup**:
     *   Supports **GitHub Gist** backup (Recommended).
     *   Supports **WebDAV** backup (Nextcloud, etc.).

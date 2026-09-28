@@ -23,6 +23,12 @@ const els = {
   addRuleBtn: document.getElementById('addRuleBtn'),
   addTempRuleBtn: document.getElementById('addTempRuleBtn'),
   removeBtn: document.getElementById('removeBtn'),
+  whitelistArea: document.getElementById('whitelistArea'),
+  addWhitelistBtn: document.getElementById('addWhitelistBtn'),
+  removeWhitelistBtn: document.getElementById('removeWhitelistBtn'),
+  whitelistButtonLabel: document.getElementById('whitelistButtonLabel'),
+  whitelistHint: document.getElementById('whitelistHint'),
+  whitelistMessage: document.getElementById('whitelistMessage'),
   
   goOptions: document.getElementById('openSettings')
 };
@@ -36,6 +42,15 @@ let popupPort = null;
 let initDone = false;
 let popupReloadTimer = null;
 let frameProbeScheduled = false;
+let baseConfigLoadId = 0;
+let hasLoadedBaseConfig = false;
+let configuredServers = [];
+let configuredActiveServerId = null;
+let requestedLanguage = null;
+let languageRequestId = 0;
+let languageLoadPromise = Promise.resolve();
+const languagePackCache = new Map();
+const htmlTranslationTemplates = { attributes: [], text: [] };
 
 // --- 核心：智能 i18n 函数 ---
 const i18n = (key) => {
@@ -93,6 +108,8 @@ function sendMessageWithTimeout(message, timeoutMs, label) {
 (async function init() {
   const t0 = Date.now();
   PSL.checkpoint('popup', 'popup.init_started');
+  // 在填入服务器名称等动态内容之前保留原始模板，切换语言时仍能重新翻译。
+  captureHtmlTranslations();
   const configPromise = loadBaseConfig();
   const timeoutPromise = new Promise(resolve => {
     setTimeout(() => resolve('timeout'), 3000);
@@ -112,7 +129,7 @@ function sendMessageWithTimeout(message, timeoutMs, label) {
 
 
 // 监听配置变化（仅监听与 UI 相关的键，忽略黑匣子等诊断写入）
-const POPUP_RELEVANT_KEYS = ['serverList', 'activeServerId', 'userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'pacScriptData'];
+const POPUP_RELEVANT_KEYS = ['serverList', 'activeServerId', 'userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'pacScriptData', 'appLanguage', 'theme'];
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const changedKeys = Object.keys(changes);
@@ -129,18 +146,25 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // --- 核心功能函数 ---
 
 async function loadBaseConfig() {
+  const loadId = ++baseConfigLoadId;
   return new Promise(resolve => {
-    chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage', 'pacScriptData'], async (items) => {
-      if (chrome.runtime.lastError) {
-        PSL.error('popup', 'base config storage.get failed', chrome.runtime.lastError.message);
-        items = {};
-      } else {
-        items = items || {};
+    chrome.storage.local.get(['serverList', 'activeServerId', 'theme', 'appLanguage', 'pacScriptData'], (items) => {
+      const error = chrome.runtime.lastError;
+      if (error) PSL.error('popup', 'base config storage.get failed', error.message);
+      if (loadId !== baseConfigLoadId) {
+        resolve();
+        return;
       }
+      if (error && hasLoadedBaseConfig) {
+        // 临时读取失败不代表用户清空配置，保留已显示的语言、主题和服务器。
+        resolve();
+        return;
+      }
+      if (!error) hasLoadedBaseConfig = true;
+      items = error ? {} : items || {};
       const userLang = items.appLanguage || 'auto';
-      if (userLang !== 'auto') {
-        loadLanguagePack(userLang);
-      }
+      // 语言包独立加载，慢请求不会延迟页面状态或依赖后台唤醒。
+      loadLanguagePack(userLang);
 
       const theme = items.theme || 'system';
       const doc = document.documentElement;
@@ -148,37 +172,21 @@ async function loadBaseConfig() {
       else if (theme === 'light') doc.setAttribute('data-theme', 'light');
       else doc.removeAttribute('data-theme');
 
-      const servers = items.serverList || [];
-      const activeId = items.activeServerId;
-      
-      const currentOptions = Array.from(els.serverSelect.options).map(o => o.value + o.text).join('|');
-      const newOptions = servers.map(s => s.id + s.name).join('|');
-      
-      if (currentOptions !== newOptions || els.serverSelect.innerHTML === '') {
-        els.serverSelect.innerHTML = '';
-        if (servers.length === 0) {
-          const opt = document.createElement('option');
-          opt.textContent = i18n("popNoServer");
-          els.serverSelect.appendChild(opt);
-          els.serverSelect.disabled = true;
-        } else {
-          els.serverSelect.disabled = false;
-          servers.forEach(s => {
-            const opt = document.createElement('option');
-            opt.value = s.id;
-            opt.textContent = s.name;
-            if (s.id === activeId) opt.selected = true;
-            els.serverSelect.appendChild(opt);
-          });
-        }
-      } else {
-        els.serverSelect.value = activeId;
-      }
+      configuredServers = items.serverList || [];
+      configuredActiveServerId = items.activeServerId;
+      renderServerOptions();
 
       chrome.proxy.settings.get({}, (d) => {
+        const error = chrome.runtime.lastError;
+        if (loadId !== baseConfigLoadId) return;
+        if (error) {
+          PSL.error('popup', 'Proxy mode read failed', error.message);
+          return;
+        }
         if (d && d.value) {
           currentMode = d.value.mode;
           updateModeUI(currentMode);
+          if (currentTabDomain) checkDomainStatusWrapper(currentTabLoading);
         }
       });
 
@@ -192,15 +200,75 @@ async function loadBaseConfig() {
   });
 }
 
-async function loadLanguagePack(lang) {
-  try {
-    const url = chrome.runtime.getURL(`_locales/${lang}/messages.json`);
-    const res = await fetch(url);
-    customMessages = await res.json();
-    localizeHtmlPage();
-  } catch (e) {
-    PSL.error('popup', 'Failed to load language pack', e.message);
+function renderServerOptions() {
+  const options = Array.from(els.serverSelect.options);
+  if (!configuredServers.length) {
+    if (!els.serverSelect.disabled || options.length !== 1) {
+      els.serverSelect.innerHTML = '';
+      els.serverSelect.appendChild(document.createElement('option'));
+    }
+    els.serverSelect.options[0].textContent = i18n('popNoServer');
+    els.serverSelect.disabled = true;
+    return;
   }
+
+  const optionsMatch = !els.serverSelect.disabled && options.length === configuredServers.length &&
+    configuredServers.every((server, index) => options[index].value === String(server.id) && options[index].textContent === server.name);
+  if (!optionsMatch) {
+    els.serverSelect.innerHTML = '';
+    configuredServers.forEach(server => {
+      const option = document.createElement('option');
+      option.value = server.id;
+      option.textContent = server.name;
+      els.serverSelect.appendChild(option);
+    });
+  }
+  els.serverSelect.disabled = false;
+  els.serverSelect.value = configuredServers.some(server => server.id === configuredActiveServerId)
+    ? configuredActiveServerId : configuredServers[0].id;
+}
+
+function refreshLocalizedUI() {
+  localizeHtmlPage();
+  renderServerOptions();
+  if (initDone) checkDomainStatusWrapper(currentTabLoading);
+  if (typeof refreshWhitelistUI === 'function') refreshWhitelistUI();
+}
+
+function loadLanguagePack(lang) {
+  if (lang === requestedLanguage) return languageLoadPromise;
+  requestedLanguage = lang;
+  const requestId = ++languageRequestId;
+
+  if (lang === 'auto') {
+    customMessages = null;
+    languageLoadPromise = Promise.resolve();
+    if (initDone) refreshLocalizedUI();
+    return languageLoadPromise;
+  }
+
+  if (!languagePackCache.has(lang)) {
+    const url = chrome.runtime.getURL(`_locales/${lang}/messages.json`);
+    languagePackCache.set(lang, fetch(url).then(res => {
+      if (!res.ok) throw new Error(`Language pack request failed: ${res.status}`);
+      return res.json();
+    }).catch(error => {
+      languagePackCache.delete(lang);
+      throw error;
+    }));
+  }
+
+  languageLoadPromise = languagePackCache.get(lang).then(messages => {
+    if (requestId !== languageRequestId) return;
+    customMessages = messages;
+    refreshLocalizedUI();
+  }).catch(error => {
+    if (requestId !== languageRequestId) return;
+    customMessages = null;
+    PSL.error('popup', 'Failed to load language pack', error.message);
+    refreshLocalizedUI();
+  });
+  return languageLoadPromise;
 }
 
 function classifyTabUrl(tab) {
@@ -311,7 +379,111 @@ function analyzeCurrentTab() {
   });
 }
 
+const whitelistState = { rules: [], busy: false, messageKey: '', error: false };
+let domainStatusRequestId = 0;
+
+// Match the PAC's hostname/suffix lookup, without broadening a host to its root domain.
+function normalizeWhitelistHost(rule) {
+  if (typeof rule !== 'string') return '';
+  const host = rule.trim().toLowerCase();
+  if (!/[^\x00-\x7F]/.test(host)) return host;
+  try { return new URL('http://' + host).hostname; }
+  catch (_) { return host; }
+}
+
+function findWhitelistRule(domain, rules) {
+  let host = domain;
+  const normalized = new Set(rules.map(normalizeWhitelistHost));
+  while (host) {
+    if (normalized.has(host)) return host;
+    const dot = host.indexOf('.');
+    if (dot < 0) break;
+    host = host.substring(dot + 1);
+  }
+  return '';
+}
+
+function refreshWhitelistUI(rules) {
+  if (Array.isArray(rules)) whitelistState.rules = rules;
+  els.whitelistArea.style.display = currentTabDomain ? 'block' : 'none';
+  if (!currentTabDomain) return;
+  const matched = findWhitelistRule(currentTabDomain, whitelistState.rules);
+  const exact = whitelistState.rules.some(rule => normalizeWhitelistHost(rule) === currentTabDomain);
+  els.whitelistButtonLabel.textContent = i18n(matched ? 'popBtnWhitelisted' : 'popBtnWhitelist');
+  els.addWhitelistBtn.disabled = whitelistState.busy || !!matched;
+  els.removeWhitelistBtn.style.display = exact ? 'flex' : 'none';
+  els.removeWhitelistBtn.disabled = whitelistState.busy;
+  els.whitelistHint.textContent = i18n(matched && !exact ? 'popWhitelistInherited' : 'popWhitelistScope')
+    .replace('%DOMAIN%', matched || currentTabDomain);
+  if (currentMode !== 'pac_script') {
+    els.whitelistHint.textContent += ' ' + i18n('popWhitelistAutoOnly');
+  }
+  els.whitelistMessage.textContent = whitelistState.messageKey ? i18n(whitelistState.messageKey) : '';
+  els.whitelistMessage.style.display = whitelistState.messageKey ? 'block' : 'none';
+  els.whitelistMessage.className = 'rule-message' + (whitelistState.error ? ' error' : '');
+}
+
+function whitelistStorageCall(method, value) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Whitelist storage timeout')), 3000);
+    try {
+      chrome.storage.local[method](value, (result) => {
+        clearTimeout(timer);
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(result);
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+}
+
+async function updateWhitelist(add) {
+  const domain = currentTabDomain;
+  const otherButtons = [els.addRuleBtn, els.addTempRuleBtn, els.removeBtn];
+  if (!domain || whitelistState.busy || otherButtons.some(button => button.disabled)) return;
+  whitelistState.busy = true;
+  whitelistState.messageKey = '';
+  whitelistState.error = false;
+  otherButtons.forEach(button => { button.disabled = true; });
+  refreshWhitelistUI();
+  let saved = false;
+  try {
+    const items = await whitelistStorageCall('get', ['userWhitelist']);
+    const rules = items && items.userWhitelist === undefined ? [] : items && items.userWhitelist;
+    if (!Array.isArray(rules)) throw new Error('Invalid whitelist configuration');
+    const next = add
+      ? (findWhitelistRule(domain, rules) ? rules : [...rules, domain])
+      : rules.filter(rule => normalizeWhitelistHost(rule) !== domain);
+    if (next.length !== rules.length) {
+      await whitelistStorageCall('set', { userWhitelist: next });
+    }
+    saved = true;
+    whitelistState.rules = next;
+    whitelistState.messageKey = add ? 'popWhitelistSaved' : 'popWhitelistRemoved';
+    refreshWhitelistUI();
+    checkDomainStatusWrapper(currentTabLoading);
+    // The worker applies this only if the actual proxy mode is still Auto.
+    const result = await sendMessageWithTimeout({ type: 'REFRESH_PROXY', applyIfPac: true }, 2500, 'REFRESH_PROXY');
+    if (!result || !result.success) whitelistState.messageKey = 'popWhitelistApplyPending';
+  } catch (error) {
+    whitelistState.messageKey = saved ? 'popWhitelistApplyPending' : 'popErrWhitelist';
+    whitelistState.error = true;
+    PSL.error('popup', 'Whitelist operation failed', error);
+  } finally {
+    whitelistState.busy = false;
+    otherButtons.forEach(button => { button.disabled = false; });
+    refreshWhitelistUI();
+  }
+}
+
+els.addWhitelistBtn.onclick = () => updateWhitelist(true);
+els.removeWhitelistBtn.onclick = () => updateWhitelist(false);
+
 function checkDomainStatusWrapper(isLoading) {
+  const requestId = ++domainStatusRequestId;
   // 如果域名为空，不要去查 storage，直接显示无效 UI
   if (!currentTabDomain) {
     showInvalidPageUI();
@@ -327,10 +499,18 @@ function checkDomainStatusWrapper(isLoading) {
     }
     if (els.addBtnGroup) els.addBtnGroup.style.display = 'none';
     if (els.removeBtn) els.removeBtn.style.display = 'none';
+    refreshWhitelistUI();
+    // Keep the loading-page path light: no GFWList read or rule compilation.
+    chrome.storage.local.get(['userWhitelist'], (items) => {
+      const error = chrome.runtime.lastError;
+      if (requestId !== domainStatusRequestId || error) return;
+      refreshWhitelistUI(items && items.userWhitelist || []);
+    });
     recordPopupUiState(currentTabUrlKind);
     return;
   }
   chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains'], (items) => {
+    if (requestId !== domainStatusRequestId) return;
     if (chrome.runtime.lastError) {
       PSL.error('popup', 'domain status storage.get failed', chrome.runtime.lastError.message);
       showInvalidPageUI();
@@ -356,6 +536,7 @@ function showInvalidPageUI() {
   
   if (els.addBtnGroup) els.addBtnGroup.style.display = 'none';
   if (els.removeBtn) els.removeBtn.style.display = 'none';
+  refreshWhitelistUI();
 }
 
 // 核心状态判断逻辑
@@ -373,7 +554,6 @@ function checkDomainStatus(items, opts) {
 
   const userRulesSet = new Set(userRules.filter(Boolean));
   const tempRulesSet = new Set(tempRules.filter(Boolean));
-  const whitelistSet = new Set(whitelist.filter(Boolean));
   const gfwRulesSet = new Set(gfwRules.filter(Boolean));
 
   const wildcardSuffixes = userRules
@@ -395,7 +575,7 @@ function checkDomainStatus(items, opts) {
   let isWhite = false;
   let statusClass = "status-direct";
 
-  if (matchDomain(currentTabDomain, whitelistSet)) { 
+  if (findWhitelistRule(currentTabDomain, whitelist)) {
     text = i18n("popStatusForceDirect"); 
     icon = "🛡️";
     isWhite = true; 
@@ -423,6 +603,21 @@ function checkDomainStatus(items, opts) {
     statusClass = "status-direct";
   }
 
+  // Saved domain rules only control routing in Auto mode.
+  if (currentMode === 'system') {
+    text = i18n('popTitleSystem');
+    icon = '💻';
+    statusClass = 'status-direct';
+  } else if (currentMode === 'fixed_servers') {
+    text = i18n('popTitleGlobal');
+    icon = '🚀';
+    statusClass = 'status-proxy';
+  } else if (currentMode === 'direct') {
+    text = i18n('popTitleDirect');
+    icon = '🛡️';
+    statusClass = 'status-direct';
+  }
+
   els.status.textContent = text;
   els.statusIcon.textContent = icon;
 
@@ -431,7 +626,12 @@ function checkDomainStatus(items, opts) {
     wrapper.className = `domain-card ${statusClass}`;
   }
   
-  if (isProxy || isWhite) {
+  refreshWhitelistUI(whitelist);
+  if (isWhite) {
+    // Removing a direct exception must not erase underlying proxy rules.
+    els.removeBtn.style.display = 'none';
+    els.addBtnGroup.style.display = 'none';
+  } else if (isProxy) {
     els.removeBtn.style.display = 'flex'; 
     els.addBtnGroup.style.display = 'none';
     els.removeBtn.onclick = () => removeDomainRule();
@@ -534,6 +734,7 @@ function updateModeUI(m) {
   else if (m === 'fixed_servers') els.modeFixed.classList.add('active');
   else if (m === 'direct') els.modeDirect.classList.add('active');
   else if (m === 'system') els.modeSystem.classList.add('active');
+  refreshWhitelistUI();
 }
 
 function getRootDomain(hostname) {
@@ -612,47 +813,44 @@ function removeDomainRule() {
   });
 }
 
-// --- 翻译辅助函数 (升级版) ---
-function localizeHtmlPage() {
-  // 1. 处理属性翻译
-  const attributes = ['placeholder', 'title', 'alt', 'value'];
+// --- 翻译辅助函数：保留模板，支持异步加载完成后及语言切换时重新翻译 ---
+function captureHtmlTranslations() {
+  const attributes = ['placeholder', 'title', 'alt', 'value', 'aria-label'];
   const elements = document.querySelectorAll(attributes.map(attr => `[${attr}]`).join(','));
   elements.forEach(el => {
     attributes.forEach(attr => {
-      const val = el.getAttribute(attr);
-      if (val && val.includes('__MSG_')) {
-        const newVal = val.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
-        el.setAttribute(attr, newVal);
+      const template = el.getAttribute(attr);
+      if (template && template.includes('__MSG_')) {
+        htmlTranslationTemplates.attributes.push({ el, attr, template });
       }
     });
   });
 
-  // 2. 处理文本节点 (支持 HTML 标签)
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
   let node;
-  const nodesToReplace = [];
-  
-  while(node = walker.nextNode()) {
+  while ((node = walker.nextNode())) {
     if (node.nodeValue.includes('__MSG_')) {
-      nodesToReplace.push(node);
+      htmlTranslationTemplates.text.push({ node, template: node.nodeValue, html: false });
     }
   }
-  
-  nodesToReplace.forEach(node => {
-    const parent = node.parentNode;
-    const translatedText = node.nodeValue.replace(/__MSG_(\w+)__/g, (m, key) => i18n(key) || m);
-    
-    // 如果翻译内容包含 HTML 标签
-    if (translatedText.includes('<') && translatedText.includes('>')) {
-       const temp = document.createElement('span');
-       temp.innerHTML = translatedText;
-       while (temp.firstChild) {
-         parent.insertBefore(temp.firstChild, node);
-       }
-       parent.removeChild(node);
-    } else {
-       node.nodeValue = translatedText;
+}
+
+function localizeHtmlPage() {
+  const translate = template => template.replace(/__MSG_(\w+)__/g, (match, key) => i18n(key) || match);
+  htmlTranslationTemplates.attributes.forEach(({ el, attr, template }) => {
+    el.setAttribute(attr, translate(template));
+  });
+  htmlTranslationTemplates.text.forEach(entry => {
+    if (!entry.node.parentNode) return;
+    const translatedText = translate(entry.template);
+    if (!entry.html && translatedText.includes('<') && translatedText.includes('>')) {
+      const span = document.createElement('span');
+      entry.node.parentNode.replaceChild(span, entry.node);
+      entry.node = span;
+      entry.html = true;
     }
+    if (entry.html) entry.node.innerHTML = translatedText;
+    else entry.node.nodeValue = translatedText;
   });
 }
 

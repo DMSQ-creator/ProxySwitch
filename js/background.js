@@ -271,19 +271,28 @@ function persistPacScriptIfNeeded(items, pacScriptStr, callback) {
     if (callback) callback();
     return;
   }
+  const wasApplyingProxy = isApplyingProxy;
   isApplyingProxy = true;
   pacUpdateVersion++;
   const tSet = Date.now();
-  chrome.storage.local.set({
-    pacScriptData: pacScriptStr,
-    pacVersion: pacUpdateVersion,
-    pacHash: newPacHash,
-  }, () => {
+  let completed = false;
+  const finish = (error) => {
+    if (completed) return;
+    completed = true;
     PSL.perf('background', 'PAC persist set', tSet, `len=${pacScriptStr.length}`, 300);
-    lastPacHash = newPacHash;
-    isApplyingProxy = false;
-    if (callback) callback();
-  });
+    if (!error) lastPacHash = newPacHash;
+    isApplyingProxy = wasApplyingProxy;
+    if (callback) callback(error);
+  };
+  try {
+    chrome.storage.local.set({
+      pacScriptData: pacScriptStr,
+      pacVersion: pacUpdateVersion,
+      pacHash: newPacHash,
+    }, () => finish(chrome.runtime.lastError ? new Error(chrome.runtime.lastError.message) : null));
+  } catch (error) {
+    finish(error);
+  }
 }
 
 // ===== 初始化与监听 =====
@@ -347,10 +356,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
   if (m.type === 'REFRESH_PROXY') {
     const t0 = Date.now();
-    refreshCacheAndIcon(() => {
+    refreshCacheAndIcon((error) => {
       PSL.perf('background', 'REFRESH_PROXY total', t0, null, 300);
-      sendResponse({ success: true });
-    });
+      sendResponse(error ? { success: false, error: error.message || String(error) } : { success: true });
+    }, m.applyIfPac === true);
     return true;
   } else if (m.type === 'ENSURE_PAC') {
     const t0 = Date.now();
@@ -459,23 +468,22 @@ function normalizeSet(list) {
 }
 
 /**
- * Lightweight refresh: only update in-memory cache and regenerate PAC script,
- * without re-applying proxy mode. Used for REFRESH_PROXY messages from popup
- * to avoid background overwriting popup's just-set proxy config.
+ * Refresh the cache and PAC without changing the user's selected proxy mode.
+ * Rule edits may request application of the new script if PAC is still active.
  */
-function refreshCacheAndIcon(done) {
+function refreshCacheAndIcon(done, applyIfPac = false) {
   if (isApplyingProxy) {
     let retries = 0;
     const tryAgain = () => {
       if (!isApplyingProxy) {
-        refreshCacheAndIcon(done);
+        refreshCacheAndIcon(done, applyIfPac);
         return;
       }
       retries++;
       if (retries > 20) {
         PSL.warn('background', 'refreshCacheAndIcon timeout, forcing unlock');
         isApplyingProxy = false;
-        refreshCacheAndIcon(done);
+        refreshCacheAndIcon(done, applyIfPac);
         return;
       }
       setTimeout(tryAgain, 50);
@@ -484,7 +492,24 @@ function refreshCacheAndIcon(done) {
     return;
   }
   isApplyingProxy = true;
-  chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
+  let completed = false;
+  const finish = (error) => {
+    if (completed) return;
+    completed = true;
+    isApplyingProxy = false;
+    if (error) PSL.error('background', 'Proxy refresh failed', error.message || String(error));
+    if (done) done(error);
+  };
+  const guarded = (callback) => (...args) => {
+    if (completed) return;
+    try {
+      callback(...args);
+    } catch (error) {
+      finish(error);
+    }
+  };
+  const readCache = guarded(() => chrome.storage.local.get(PAC_RELATED_KEYS, guarded((items) => {
+    if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
     cachedUserRules = normalizeSet(items.userRules);
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
@@ -492,16 +517,32 @@ function refreshCacheAndIcon(done) {
     if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
 
     const pacScriptStr = buildPacScriptString(resolveActiveServer(items));
-    persistPacScriptIfNeeded(items, pacScriptStr, () => {
-      chrome.proxy.settings.get({}, (d) => {
+    persistPacScriptIfNeeded(items, pacScriptStr, guarded((error) => {
+      if (error) throw error;
+      chrome.proxy.settings.get({}, guarded((d) => {
+        if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
         const mode = (d && d.value) ? d.value.mode : 'direct';
         currentProxyMode = mode;
-        handleGlobalIconUpdate(mode);
-        isApplyingProxy = false;
-        if (done) done();
-      });
-    });
-  });
+        const updateIcon = () => {
+          handleGlobalIconUpdate(mode);
+          finish();
+        };
+        if (applyIfPac && mode === 'pac_script') {
+          if (!pacScriptStr) throw new Error('no_server');
+          chrome.proxy.settings.set({
+            value: { mode: 'pac_script', pacScript: { data: pacScriptStr } },
+            scope: 'regular',
+          }, guarded(() => {
+            if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
+            updateIcon();
+          }));
+        } else {
+          updateIcon();
+        }
+      }));
+    }));
+  })));
+  readCache();
 }
 
 function updateCacheAndApply(specificTabId, specificUrl, _retries, traceBoot) {

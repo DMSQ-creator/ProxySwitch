@@ -129,7 +129,7 @@ function createFakeChrome(initial = {}, options = {}) {
       lastError: null,
       getManifest() {
         return {
-          version: '7.9.0-test',
+          version: '7.10.0-test',
           manifest_version: 3,
           action: { default_popup: 'html/popup.html' },
         };
@@ -463,7 +463,7 @@ test('logical clear hides late old writes, retains boot history, and never remov
       sequence: 1,
       phase: 'script_entered',
       createdAtMs: Date.now() - 5000,
-      version: '7.9.0-test',
+      version: '7.10.0-test',
     },
   };
   const backend = createFakeChrome(initial);

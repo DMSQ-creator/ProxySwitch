@@ -35,7 +35,7 @@
 
     body {
         width: 340px; 
-        height: 370px; /* 紧凑高度 */
+        min-height: 370px;
         margin: 0; 
         padding: 0;
         overflow-x: hidden; 
@@ -47,7 +47,7 @@
         flex-direction: column;
     }
 
-    #app { display: flex; flex-direction: column; height: 100%; }
+    #app { display: flex; flex-direction: column; min-height: 370px; }
 
     /* --- 顶部导航 --- */
     .header {
@@ -203,6 +203,17 @@
       display: flex; align-items: center; justify-content: center; gap: 8px;
     }
     .btn-action:active { transform: scale(0.98); }
+    .btn-action:disabled { cursor: default; opacity: 0.65; transform: none; }
+    .btn-action:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    .whitelist-area { margin-bottom: 10px; }
+    .whitelist-actions { display: flex; gap: 8px; }
+    .btn-whitelist { flex: 1; background: var(--bg-card); color: var(--primary); border: 1px solid var(--primary); }
+    .btn-whitelist:hover:not(:disabled) { background: var(--bg-body); }
+    .btn-undo { padding: 0 12px; background: var(--bg-card); color: var(--text-sub); border: 1px solid var(--border); }
+    .rule-hint, .rule-message { margin: 6px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
+    .rule-message { color: var(--primary); }
+    .rule-message.error { color: var(--danger); }
     
     .btn-add { background: var(--primary); color: white; box-shadow: 0 4px 10px rgba(14, 165, 233, 0.3); }
     .btn-add:hover { background: var(--primary-hover); }
@@ -260,6 +271,16 @@
       
       <!-- 操作按钮区 -->
       <div id="actionArea">
+        <div id="whitelistArea" class="whitelist-area" style="display:none;">
+          <div class="whitelist-actions">
+            <button id="addWhitelistBtn" class="btn-action btn-whitelist" type="button">
+              <span aria-hidden="true">🛡️</span><span id="whitelistButtonLabel"></span>
+            </button>
+            <button id="removeWhitelistBtn" class="btn-action btn-undo" type="button" style="display:none;">__MSG_popBtnUndoWhitelist__</button>
+          </div>
+          <p id="whitelistHint" class="rule-hint"></p>
+          <p id="whitelistMessage" class="rule-message" role="status" aria-live="polite" style="display:none;"></p>
+        </div>
         <div id="addBtnGroup" style="display:flex; gap:10px; width:100%;">
           <button id="addRuleBtn" class="btn-action btn-add" style="flex:2;">
             <span style="font-size:16px;padding-top: 4px;">+</span> __MSG_popBtnAdd__

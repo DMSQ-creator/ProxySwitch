@@ -1,4 +1,26 @@
-# 更新说明
+# 更新说明 / Changelog
+
+## v7.10.0 — 2026-09-28
+
+### 中文
+
+- 新增：弹窗可一键将当前域名加入直连白名单，网页仍在加载时也可操作；明确展示域名及子域名范围，并支持只撤销白名单、保留原有代理规则
+- 修复：Chrome 使用英文、插件选择简体中文时，弹窗部分文字仍为英文；语言包加载完成后重新翻译按钮、提示和动态状态，切回跟随浏览器语言同样生效
+- 优化：白名单变更在自动分流模式下刷新 PAC；其他模式只保存规则并提示生效条件，避免误显示已直连或改变当前代理模式
+- 修复：代理模式延迟返回时重新校正站点状态；配置临时读取失败时保留已加载的语言、主题和服务器选择
+- 完善：白名单保存失败或超时时恢复操作按钮；区分“规则已保存”和“代理刷新尚未确认”，防止误报成功
+- 验证：90 项自动化检查通过；在英文 Chromium 中验证简体中文显示、语言切换、白名单添加与撤销、实际 PAC 分流及浅色/深色界面
+- 兼容性：现有配置无需迁移，未新增权限；最低支持 Chrome 95
+
+### English
+
+- Added a one-click **Direct for this site** button in the popup, available even while the page is loading. The popup shows the hostname and subdomain scope; undo removes only that hostname's direct-list entry and keeps existing proxy rules.
+- Fixed partially English popup text when Chrome uses English and the extension is set to Simplified Chinese. Buttons, tooltips, and dynamic status labels are retranslated when the language pack loads; switching back to the browser language also works.
+- Direct-list changes now refresh the active PAC in Auto mode. Other modes save the rule and explain when it applies, without changing the selected proxy mode or claiming the site is already connected directly.
+- Fixed stale site status when the proxy mode arrives late. Temporary configuration-read failures now preserve the loaded language, theme, and server selection.
+- Improved error handling: failed or timed-out direct-list updates release the action buttons, and the popup distinguishes saved rules from unconfirmed proxy refreshes.
+- Validation: all 90 automated checks passed. An English Chromium session also verified Simplified Chinese text, language switching, direct-list add/undo, actual PAC routing, and light/dark layouts.
+- Compatibility: existing settings need no migration, no new permissions were added, and Chrome 95 remains the minimum supported version.
 
 ## v7.9.0
 

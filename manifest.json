@@ -4,7 +4,7 @@
   "name": "__MSG_appName__",
   "description": "__MSG_appDesc__",
   "default_locale": "en",
-  "version": "7.9.0",
+  "version": "7.10.0",
   "permissions": [
     "proxy", "storage", "tabs" 
   ],
