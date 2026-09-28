@@ -84,9 +84,16 @@ let coreModulesReady = false;
 try {
   importScripts('logger.js');
   importScripts('utils.js');
+  importScripts('routing.js');
   coreModulesReady = true;
 } catch (e) {
   console.error('[ProxySwitch] Failed to load core modules — extension may not work correctly', e);
+}
+
+try {
+  importScripts('diagnostics-background.js');
+} catch (error) {
+  console.error('[ProxySwitch] Request diagnostics unavailable', error);
 }
 
 let iconDataReady = false;
@@ -122,6 +129,8 @@ let cachedUserRules = new Set();
 let cachedUserWhitelist = new Set();
 let cachedGfwDomains = new Set();
 let cachedTempRules = new Set();
+let cachedDiagnosticTrial = null;
+let cachedRoutingRules = null;
 let isSyncing = false;
 
 // 🔥 修复 Bug #1: PAC 死循环防护
@@ -154,6 +163,7 @@ const PAC_RELATED_KEYS = [
   'activeServerId',
   'pacScriptData',
   'pacHash',
+  'diagnosticTrial',
 ];
 
 // ===== 初始化 Promise =====
@@ -204,60 +214,13 @@ function resolveActiveServer(items) {
 }
 
 function buildPacScriptString(activeServer) {
-  if (!activeServer) return '';
-  let host = (activeServer.host || '127.0.0.1').trim();
-  if (/[^\x00-\x7F]/.test(host)) {
-    try { host = new URL('http://' + host).hostname; }
-    catch (e) { host = '127.0.0.1'; }
-  }
-  let port = parseInt(activeServer.port, 10);
-  if (isNaN(port) || port < 1 || port > 65535) port = 1080;
-  const scheme = (activeServer.scheme || 'SOCKS5').toUpperCase();
-  const SUPPORTED_SCHEMES = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'];
-  if (!SUPPORTED_SCHEMES.includes(scheme)) {
-    PSL.warn('background', `Unsupported proxy scheme "${scheme}", falling back to SOCKS5`);
-  }
-  let pacProxyType = 'SOCKS5';
-  if (scheme === 'HTTP' || scheme === 'HTTPS') pacProxyType = 'PROXY';
-  else if (scheme === 'SOCKS4') pacProxyType = 'SOCKS';
-  const proxyStr = `${pacProxyType} ${host}:${port}; DIRECT`;
-  const rawUserRules = Array.from(cachedUserRules || []);
-  const wildcardRules = rawUserRules.filter(r => r.includes('*'));
-  const normalUserRules = rawUserRules.filter(r => !r.includes('*'));
-  const allMapRules = [...normalUserRules, ...cachedGfwDomains, ...cachedTempRules];
-  return `
-      var Proxy = "${proxyStr}";
-      var Direct = "DIRECT";
-      var pMap = ${JSON.stringify(Object.fromEntries(allMapRules.map(d => [d, 1])))};
-      var dMap = ${JSON.stringify(Object.fromEntries([...cachedUserWhitelist].map(d => [d, 1])))};
-      var wList = ${JSON.stringify(wildcardRules)};
-      var ipRegex = /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/;
-      function FindProxyForURL(url, host) {
-        if (isPlainHostName(host) || shExpMatch(host, "*.local")) return Direct;
-        if (ipRegex.test(host)) {
-          if (isInNet(host, "10.0.0.0", "255.0.0.0") ||
-              isInNet(host, "172.16.0.0", "255.240.0.0") ||
-              isInNet(host, "192.168.0.0", "255.255.0.0") ||
-              isInNet(host, "127.0.0.0", "255.0.0.0")) return Direct;
-        }
-        host = host.toLowerCase();
-        if (check(host, dMap)) return Direct;
-        for (var i = 0; i < wList.length; i++) {
-          if (shExpMatch(host, wList[i]) || shExpMatch("." + host, wList[i])) return Proxy;
-        }
-        if (check(host, pMap)) return Proxy;
-        return Direct;
-      }
-      function check(h, m) {
-        if (m[h]) return true;
-        var p = h.indexOf('.');
-        while (p !== -1) {
-          if (m[h.substring(p + 1)]) return true;
-          p = h.indexOf('.', p + 1);
-        }
-        return false;
-      }
-    `;
+  cachedRoutingRules = ProxySwitchRouting.prepare({
+    userRules: cachedUserRules,
+    userWhitelist: cachedUserWhitelist,
+    gfwDomains: cachedGfwDomains,
+    tempRules: cachedTempRules,
+  });
+  return ProxySwitchRouting.buildPac(activeServer, cachedRoutingRules, cachedDiagnosticTrial);
 }
 
 function persistPacScriptIfNeeded(items, pacScriptStr, callback) {
@@ -370,6 +333,7 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
       cachedUserWhitelist = normalizeSet(items.userWhitelist);
       cachedGfwDomains = normalizeSet(items.gfwDomains);
       cachedTempRules = normalizeSet(items.tempRules);
+      cachedDiagnosticTrial = items.diagnosticTrial || null;
       if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
 
       const activeServer = resolveActiveServer(items);
@@ -471,19 +435,19 @@ function normalizeSet(list) {
  * Refresh the cache and PAC without changing the user's selected proxy mode.
  * Rule edits may request application of the new script if PAC is still active.
  */
-function refreshCacheAndIcon(done, applyIfPac = false) {
+function refreshCacheAndIcon(done, applyIfPac = false, ownedOnly = false) {
   if (isApplyingProxy) {
     let retries = 0;
     const tryAgain = () => {
       if (!isApplyingProxy) {
-        refreshCacheAndIcon(done, applyIfPac);
+        refreshCacheAndIcon(done, applyIfPac, ownedOnly);
         return;
       }
       retries++;
       if (retries > 20) {
         PSL.warn('background', 'refreshCacheAndIcon timeout, forcing unlock');
         isApplyingProxy = false;
-        refreshCacheAndIcon(done, applyIfPac);
+        refreshCacheAndIcon(done, applyIfPac, ownedOnly);
         return;
       }
       setTimeout(tryAgain, 50);
@@ -514,6 +478,7 @@ function refreshCacheAndIcon(done, applyIfPac = false) {
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
     cachedTempRules = normalizeSet(items.tempRules);
+    cachedDiagnosticTrial = items.diagnosticTrial || null;
     if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
 
     const pacScriptStr = buildPacScriptString(resolveActiveServer(items));
@@ -527,7 +492,7 @@ function refreshCacheAndIcon(done, applyIfPac = false) {
           handleGlobalIconUpdate(mode);
           finish();
         };
-        if (applyIfPac && mode === 'pac_script') {
+        if (applyIfPac && mode === 'pac_script' && (!ownedOnly || d.levelOfControl === 'controlled_by_this_extension')) {
           if (!pacScriptStr) throw new Error('no_server');
           chrome.proxy.settings.set({
             value: { mode: 'pac_script', pacScript: { data: pacScriptStr } },
@@ -564,6 +529,7 @@ function updateCacheAndApply(specificTabId, specificUrl, _retries, traceBoot) {
     cachedUserWhitelist = normalizeSet(items.userWhitelist);
     cachedGfwDomains = normalizeSet(items.gfwDomains);
     cachedTempRules = normalizeSet(items.tempRules);
+    cachedDiagnosticTrial = items.diagnosticTrial || null;
     if (traceBoot) {
       ProxySwitchBootJournal.mark('initial_cache_built', {
         userRules: cachedUserRules.size,
@@ -847,6 +813,9 @@ async function performCloudDownload(){
       delete remoteData.lastUpdate;
       delete remoteData.updatedAt;
       delete remoteData.backupVer;
+      delete remoteData.diagnosticSession;
+      delete remoteData.diagnosticTrial;
+      delete remoteData.diagnosticUiState;
 
       // Skip empty arrays and null values to avoid overwriting local data
       const safeData = {};
@@ -1048,22 +1017,20 @@ function updateTabIcon(tabId, url) {
   let iconKey = 'pac_gray'; 
   let title = i18n("bgTitleAuto");
 
-  if (hostname) {
-    if (checkSet(hostname, cachedUserWhitelist)) { 
-      iconKey = 'pac_blue'; 
-      title = i18n("bgTitleDirect"); 
-    }
-    else if (checkSet(hostname, cachedTempRules)) { 
-      iconKey = 'pac_org'; 
-      title = i18n("bgTitleTemp"); 
-    }
-    else if (checkSet(hostname, cachedUserRules)) { 
-      iconKey = 'pac_purp'; 
-      title = i18n("bgTitleProxy"); 
-    }
-    else if (checkSet(hostname, cachedGfwDomains)) { 
-      iconKey = 'pac_green'; 
-      title = i18n("bgTitleAutoProxy"); 
+  if (hostname && cachedRoutingRules) {
+    const decision = ProxySwitchRouting.evaluate(hostname, cachedRoutingRules, {
+      mode: currentProxyMode, trial: cachedDiagnosticTrial,
+    });
+    if (decision.route === 'direct' && decision.source !== 'default') {
+      iconKey = 'pac_blue'; title = i18n('bgTitleDirect');
+    } else if (decision.route === 'proxy') {
+      if (decision.source === 'trial' || decision.source === 'temporary') {
+        iconKey = 'pac_org'; title = i18n('bgTitleTemp');
+      } else if (decision.source === 'subscription') {
+        iconKey = 'pac_green'; title = i18n('bgTitleAutoProxy');
+      } else {
+        iconKey = 'pac_purp'; title = i18n('bgTitleProxy');
+      }
     }
   }
 
@@ -1157,6 +1124,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     pendingIconUpdates.delete(tabId);
   }
 });
+
+if (typeof ProxySwitchDiagnostics !== 'undefined') {
+  ProxySwitchDiagnostics.create({
+    chrome,
+    routing: ProxySwitchRouting,
+    refresh: () => new Promise((resolve, reject) => {
+      refreshCacheAndIcon((error) => error ? reject(error) : resolve(), true, true);
+    }),
+  });
+}
 
 // All extension listeners are now registered synchronously. Business initialization starts afterwards.
 ProxySwitchBootJournal.mark('listeners_registered');

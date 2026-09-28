@@ -1,8 +1,8 @@
 # ProxySwitch 隐私政策
 
-**最后更新日期：** 2026 年 9 月 2 日
+**最后更新日期：** 2026 年 9 月 28 日
 
-**生效日期：** 2026 年 9 月 2 日
+**生效日期：** 2026 年 9 月 28 日
 
 ### 1. 简介
 ProxySwitch（以下简称“本扩展”）是一款旨在帮助用户管理代理设置和切换规则的 Chrome 浏览器扩展程序。我们要重视您的隐私，并致力于保护您的个人数据。**我们绝不会在我们的服务器上收集、存储或分享您的浏览记录或个人信息。**
@@ -12,15 +12,19 @@ ProxySwitch（以下简称“本扩展”）是一款旨在帮助用户管理代
 
 *   **代理配置：** 您输入的代理服务器详情（IP、端口、用户名、密码）仅存储在您的浏览器本地 (`chrome.storage.local`)，并仅用于通过 `chrome.proxy` API 配置浏览器的网络连接。
 *   **故障黑匣子：** 扩展会在本地保存有限数量的运行状态和启动诊断记录。诊断报告不会包含规则或 PAC 正文，并会隐藏密码、Token 和完整网页 URL；这些记录不会被自动上传。
+*   **页面请求诊断（可选）：** 仅在您主动授权请求观察权限并开始采集后，观察您选择的普通 HTTP/HTTPS 标签页，每次最长 60 秒，不支持无痕标签页。扩展在本地按域名汇总资源类型、请求计数、HTTP 状态、错误及必要的会话时间/标签页标识；最多保留 200 个域名，并限制进行中请求数量。不保存完整 URL、Cookie、请求头或请求正文。采集记录存入 `chrome.storage.local`，30 分钟后清理，您也可手动清空。临时试用规则最长有效 10 分钟。采集记录及临时试用不参加配置导出或云备份，也不会发送给开发者；您主动保存的正式规则遵循下述配置同步行为。
 *   **浏览活动 (标签页与 URL)：** 我们申请 `tabs` 权限以获取当前活动标签页的 URL。这**仅用于本地**执行以下操作：
     1.  检查当前 URL 是否匹配您配置的规则（如 GFWList）。
     2.  更新扩展图标颜色，以指示当前网站是否正在使用代理。
-    *   **我们不会保存您的浏览历史。**
+    3.  将您主动开启的页面诊断绑定到原标签页，并在您操作时刷新或返回该页面。
+    *   **不会默认记录浏览历史；主动开启诊断时仅本地暂存上述有限的请求摘要。**
     *   **我们不会将您的浏览历史上传至任何服务器。**
-*   **外部请求 (主机权限)：** 我们申请访问外部 URL 的权限（`<all_urls>`）。这仅在以下情况使用：
+*   **外部请求 (主机权限)：** 我们申请访问 HTTP/HTTPS URL 的权限。这在以下情况使用：
     1.  **您**主动点击更新，从您指定的远程 URL 下载 GFWList 规则列表。
     2.  **您**开启云同步功能，向您自己的 WebDAV 服务器或 GitHub Gist 上传/下载配置。
-    *   本扩展仅会连接到**您指定**的服务器。
+    3.  **您**主动测试代理延迟时，连接测试目标。
+    4.  **您**启用页面诊断时，配合可选的 `webRequest` 权限观察目标标签页请求；此观察本身不向外发送采集记录。
+*   **定时清理 (`alarms`)：** 用于清理过期的页面诊断记录及临时试用状态，不用于定期采集浏览活动。
 
 ### 3. 云端同步
 如果您选择使用“云同步”功能（GitHub Gist 或 WebDAV）：
@@ -47,8 +51,8 @@ ProxySwitch（以下简称“本扩展”）是一款旨在帮助用户管理代
 
 # Privacy Policy for ProxySwitch / ProxySwitch 隐私政策
 
-**Last Updated:** September 2, 2026
-**Effective Date:** September 2, 2026
+**Last Updated:** September 28, 2026
+**Effective Date:** September 28, 2026
 
 
 ### 1. Introduction
@@ -59,15 +63,19 @@ The extension operates locally on your device. We handle data in the following w
 
 *   **Proxy Configuration:** The proxy server details (IP, port, username, password) you input are stored locally in your browser (`chrome.storage.local`) and are used solely to configure the browser's proxy settings via the `chrome.proxy` API.
 *   **Fault Black Box:** The extension locally retains a limited number of runtime-state and startup-diagnostic records. Reports exclude rule and PAC contents and redact passwords, tokens, and full page URLs. These records are never uploaded automatically.
+*   **Page Request Diagnostics (Optional):** Only after you grant the optional request-observation permission and start a capture, the extension observes your selected normal HTTP/HTTPS tab for up to 60 seconds. Incognito tabs are not supported. Local domain summaries contain resource types, request counts, HTTP statuses, errors, and necessary session timestamps/tab identifiers. At most 200 domains are retained, and in-flight requests are bounded. Full URLs, cookies, request headers, and request bodies are not saved. Capture records are stored in `chrome.storage.local`, cleaned up after 30 minutes, and can be cleared manually. Temporary trial rules last at most 10 minutes. Captures and trials are excluded from configuration export and cloud backup and are not sent to the developer; permanent rules you explicitly save follow the configuration-sync behavior below.
 *   **Browsing Activity (Tabs & URLs):** We request the `tabs` permission to access the URL of the active tab. This is used **strictly locally** to:
     1.  Check if the current URL matches your configured rules (e.g., GFWList).
     2.  Update the extension icon color to indicate whether the current site is being proxied.
-    *   **We do NOT save your browsing history.**
+    3.  Bind a user-initiated diagnostic capture to its source tab and reload or return to that page when you request it.
+    *   **We do not record browsing history by default. User-initiated diagnostics temporarily retain only the limited local request summaries described above.**
     *   **We do NOT upload your browsing history to any server.**
-*   **External Requests (Host Permissions):** We request access to fetch data from external URLs (`<all_urls>` permission). This is used only when:
+*   **External Requests (Host Permissions):** We request access to HTTP/HTTPS URLs. This is used when:
     1.  **You** initiate a request to update the GFWList (Rule List) from a remote URL you specified.
     2.  **You** enable Cloud Sync to upload/download configurations to/from your own WebDAV server or GitHub Gist.
-    *   The extension only connects to the servers **you define**.
+    3.  **You** start a proxy latency test, which connects to the test target.
+    4.  **You** enable page diagnostics, when host access and the optional `webRequest` permission allow observing the selected tab's requests. Observation itself does not transmit captured records.
+*   **Scheduled Cleanup (`alarms`):** Used to clean up expired page-diagnostic records and trial state, not to periodically collect browsing activity.
 
 ### 3. Cloud Synchronization
 If you choose to use the "Cloud Sync" feature (GitHub Gist or WebDAV):

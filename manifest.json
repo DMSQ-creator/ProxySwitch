@@ -4,10 +4,11 @@
   "name": "__MSG_appName__",
   "description": "__MSG_appDesc__",
   "default_locale": "en",
-  "version": "7.10.0",
+  "version": "7.11.0",
   "permissions": [
-    "proxy", "storage", "tabs" 
+    "proxy", "storage", "tabs", "alarms"
   ],
+  "optional_permissions": ["webRequest"],
   "host_permissions": [
     "http://*/*", "https://*/*"
   ],

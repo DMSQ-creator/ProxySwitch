@@ -165,8 +165,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGeneralModule(); // 这里会初始化语言下拉框
   
   renderAll();
+  navigateToOptionsHash();
+  window.addEventListener('hashchange', navigateToOptionsHash);
   PSL.checkpoint('options', 'options.init_done', { durationMs: Date.now() - initStartedAt });
 });
+
+// Diagnostics can link directly to rule management without changing any rules.
+function navigateToOptionsHash() {
+  const target = window.location.hash.slice(1);
+  const item = Array.from($$('.menu-item')).find(entry => entry.dataset.target === target);
+  if (item) item.click();
+}
 
 // --- 翻译函数 (保持之前的修复版) ---
 function localizeHtmlPage() {

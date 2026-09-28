@@ -22,6 +22,7 @@
     *   **自动识别**：根据域名自动判断走代理还是直连。
     *   **黑白名单**：支持自定义强制代理域名（黑名单）和强制直连域名（白名单）。
     *   **本站直连**：在弹窗一键将当前域名及其子域名加入白名单，加载中的网页也可操作；支持撤销，保留原有代理规则。白名单仅在自动分流模式下生效。
+*   **🔎 当前页面请求诊断**：主动开启后，按域名查看当前页面的请求、规则线路与错误；支持批量临时试用代理/直连、撤销及保存正式规则。弹窗用于快速处理，详细页用于查看完整记录。
 *   **☁️ 云端备份**：
     *   支持 **GitHub Gist** 备份（推荐，免费且稳定）。
     *   支持 **WebDAV** 备份（坚果云、Nextcloud 等）。
@@ -97,6 +98,23 @@ ProxySwitch/
 4.  **云端备份**：
     *   在设置页面的“云端备份”中，填入 GitHub Token 或 WebDAV 信息即可备份/恢复配置。
 
+### 🔎 排查页面的跨域请求
+
+页面可能同时使用主站、验证码、登录、接口及静态资源等多个域名。自动分流按每个请求的目标域名匹配规则，不会让第三方域名自动跟随主站。
+
+1. 在需要排查的普通 HTTP/HTTPS 页面打开扩展，点击“当前页面请求”。首次使用需允许可选的请求观察权限；默认不采集，无痕标签页不支持。
+2. 点击重新加载并采集。扩展仅观察选中的标签页，每次最多采集 60 秒；开启前的历史请求无法补查。页面诊断绑定原标签页，打开详细页不会更换采集目标。
+3. 查看全部域名，或筛选与主站规则线路不同的域名。勾选要验证的域名，选择代理或直连，然后临时应用并回网页验证。试用需要自动分流模式，不会替您切换代理模式；遇到已有手动规则冲突时需先处理冲突。
+4. 有效时保存为正式规则，无效时撤销。试用最长 10 分钟，撤销只删除本次试用，不还原或覆盖期间修改的正式配置。
+
+**请注意：**
+
+* 显示的是依据 ProxySwitch 规则计算的线路，并非对实际出口 IP 的探测；代理回退及 Clash 内部规则也可能影响最终线路。
+* 请求失败不一定需要代理，HTTP 成功也不代表验证码或登录验证通过。分流不同只是排查线索，不会自动添加规则。
+* **域名规则不是按标签页隔离的：试用与保存都会影响其他页面对同一域名及其子域名的访问。**
+* 采集最多保留 200 个域名，并限制进行中请求数量。记录仅包含域名、资源类型、计数、HTTP 状态与错误等摘要，不保存完整 URL、Cookie 或请求正文；本地记录在 30 分钟后清理，也可手动清除。
+* 采集记录与临时试用不参加导出或云备份；您主动保存的正式规则遵循原有的配置备份/同步行为。
+
 ---
 
 ## <span id="en">🇺🇸 English Introduction</span>
@@ -111,6 +129,7 @@ ProxySwitch/
     *   **Auto Detection**: Automatically decides whether to proxy or connect directly based on the domain.
     *   **Black/White Lists**: Support for custom user rules (blacklist for forced proxy, whitelist for forced direct).
     *   **Direct for This Site**: Add the current hostname and its subdomains to the direct list from the popup, even while a page is loading. Undo removes the entry while keeping existing proxy rules. Direct-list rules apply only in Auto mode.
+*   **🔎 Page Request Diagnostics**: Start a capture to inspect the current page's request domains, predicted rule routes, and errors. Try proxy/direct rules in batches, undo a trial, or save permanent rules. Use the popup for quick changes and the detailed view for the full record.
 *   **☁️ Cloud Backup**:
     *   Supports **GitHub Gist** backup (Recommended).
     *   Supports **WebDAV** backup (Nextcloud, etc.).
@@ -185,6 +204,23 @@ Since this is the source code, you need to install it via "Load unpacked":
 
 4.  **Cloud Backup**:
     *   In the Options page under "Cloud Backup", enter your GitHub Token or WebDAV details to backup or restore your configuration.
+
+### 🔎 Diagnose Cross-Domain Page Requests
+
+A page may use separate domains for the main site, challenges, sign-in, APIs, and static resources. Auto mode matches each request's destination domain; third-party domains do not automatically follow the main site's route.
+
+1. Open the extension on the normal HTTP/HTTPS page you want to inspect and select **Current page requests**. First use requires the optional request-observation permission. Capture is off by default, and incognito tabs are not supported.
+2. Reload and capture. Only the selected tab is observed, for up to 60 seconds per capture. Earlier requests cannot be recovered. The detailed view stays bound to the original tab instead of becoming the capture target itself.
+3. Inspect all domains or filter for routes that differ from the main site's. Select domains, choose proxy or direct, and apply a temporary trial before returning to the page to verify it. Trials require Auto mode and do not switch your proxy mode for you. Resolve existing manual-rule conflicts first.
+4. Save working changes as permanent rules, or undo the trial. Trials expire after at most 10 minutes. Undo removes only the trial and does not restore an older snapshot of your configuration.
+
+**Important limits:**
+
+* Routes are predictions from ProxySwitch rules, not measurements of the actual exit IP. Proxy fallback and Clash's own rules may affect the final connection.
+* A failed request does not necessarily need a proxy, and an HTTP success does not prove a challenge or sign-in succeeded. Different routes are clues, not automatic rule recommendations.
+* **Domain rules are not tab-isolated: trials and saved rules also affect other pages requesting the same domain and its subdomains.**
+* Captures retain at most 200 domains and bound the number of in-flight requests. Local summaries contain domains, resource types, counts, HTTP statuses, and errors—not full URLs, cookies, or request bodies. Records are cleaned up after 30 minutes and can be cleared manually.
+* Capture records and temporary trials are excluded from configuration export and cloud backup. Permanent rules you explicitly save follow the existing configuration backup/sync behavior.
 
 ---
 

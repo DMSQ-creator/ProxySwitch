@@ -8,14 +8,14 @@ const vm = require('node:vm');
 
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'js', 'background.js'), 'utf8');
 
-function createWorker({ mode = 'pac_script', noServer = false } = {}) {
+function createWorker({ mode = 'pac_script', noServer = false, control = 'controlled_by_this_extension' } = {}) {
   const data = {
     serverList: noServer ? [] : [{ id: 'main', host: '127.0.0.1', port: 10808, scheme: 'SOCKS5' }],
     activeServerId: 'main',
     userRules: ['example.com'],
     userWhitelist: ['docs.example.com'],
   };
-  const state = { mode, fault: null, writes: [], timers: [], icons: [], onPersist: null };
+  const state = { mode, control, fault: null, writes: [], timers: [], icons: [], onPersist: null };
   let ready = false;
   let messageListener;
   let context;
@@ -50,7 +50,7 @@ function createWorker({ mode = 'pac_script', noServer = false } = {}) {
         get(_details, callback) {
           assert.equal(vm.runInContext('isApplyingProxy', context), true,
             'refresh must retain the operation lock through PAC persistence');
-          invoke('proxy.get', callback, { value: { mode: state.mode } });
+          invoke('proxy.get', callback, { value: { mode: state.mode }, levelOfControl: state.control });
         },
         set(details, callback) {
           invoke('proxy.set', callback, undefined, () => {
@@ -80,6 +80,7 @@ function createWorker({ mode = 'pac_script', noServer = false } = {}) {
     self: { addEventListener() {} },
     PSL: { setBootId() {}, perf() {}, error() {}, warn() {}, info() {}, checkpoint() {} },
     importScripts() {},
+    ProxySwitchRouting: require('../js/routing.js'),
     URL,
     setTimeout(callback) { state.timers.push(callback); return state.timers.length; },
     clearTimeout() {},
@@ -96,6 +97,12 @@ function createWorker({ mode = 'pac_script', noServer = false } = {}) {
     refresh(applyIfPac = true) {
       return new Promise((resolve) => {
         assert.equal(messageListener({ type: 'REFRESH_PROXY', applyIfPac }, {}, resolve), true);
+      });
+    },
+    refreshDiagnostics() {
+      return new Promise((resolve) => {
+        context.diagnosticRefreshDone = (error) => resolve(error ? { success: false, error: error.message } : { success: true });
+        vm.runInContext('refreshCacheAndIcon(diagnosticRefreshDone, true, true);', context);
       });
     },
     locked: () => vm.runInContext('isApplyingProxy', context),
@@ -130,6 +137,30 @@ test('ordinary refresh regenerates PAC without applying proxy settings', async (
   assert.equal((await worker.refresh(false)).success, true);
   assert.match(worker.data.pacScriptData, /docs\.example\.com/);
   assert.equal(worker.state.writes.length, 0);
+  assert.equal(worker.locked(), false);
+});
+
+for (const control of ['controlled_by_other_extensions', 'controllable_by_this_extension', 'not_controllable']) {
+  test(`diagnostic cleanup preserves PAC owned elsewhere: ${control}`, async () => {
+    const worker = createWorker({ control });
+    assert.equal((await worker.refreshDiagnostics()).success, true);
+    assert.equal(worker.state.writes.length, 0);
+    assert.equal(worker.locked(), false);
+  });
+}
+
+test('diagnostic refresh rechecks PAC ownership after persistence', async () => {
+  const worker = createWorker();
+  worker.state.onPersist = () => { worker.state.control = 'controlled_by_other_extensions'; };
+  assert.equal((await worker.refreshDiagnostics()).success, true);
+  assert.equal(worker.state.writes.length, 0);
+  assert.equal(worker.locked(), false);
+});
+
+test('diagnostic refresh applies PAC while still controlled by this extension', async () => {
+  const worker = createWorker();
+  assert.equal((await worker.refreshDiagnostics()).success, true);
+  assert.equal(worker.state.writes.length, 1);
   assert.equal(worker.locked(), false);
 });
 

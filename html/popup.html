@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script src="../js/page-boot.js"></script>
+  <link rel="stylesheet" href="../assets/diagnostics.css">
   <style>
     :root {
       /* 核心变量 */
@@ -296,13 +297,25 @@
       </div>
     </div>
     
+    <div class="ps-diag ps-diag-entry-wrap">
+      <button id="diagnosticsEntry" class="ps-diag-entry" type="button" aria-controls="diagnosticsRoot">
+        <svg class="ps-diag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h7"/><circle cx="18" cy="17" r="3"/><path d="m20 19 2 2"/></svg>
+        <span class="ps-diag-entry-copy"><span id="diagnosticsEntryTitle">Page requests</span><small id="diagnosticsEntryHint">View request domains and routing rules</small></span>
+        <svg class="ps-diag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+      </button>
+      <div id="diagnosticsHomeTrial"></div>
+    </div>
     <div class="footer" id="openSettings">
       <span style="font-size:14px">⚙️</span> __MSG_popFooter__
     </div>
   </div>
+  <section id="diagnosticsRoot" class="ps-diag" hidden></section>
 
   <script src="../js/utils.js"></script>
   <script src="../js/logger.js"></script>
+  <script src="../js/routing.js"></script>
+  <script src="../js/diagnostics-i18n.js"></script>
   <script src="../js/popup.js"></script>
+  <script src="../js/diagnostics.js"></script>
 </body>
 </html>

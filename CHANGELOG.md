@@ -1,5 +1,27 @@
 # 更新说明 / Changelog
 
+## v7.11.0 — 2026-09-28
+
+### 中文
+
+- 新增：弹窗“当前页面请求”入口与详细诊断页；用户主动开启后，按域名查看请求摘要、规则线路、匹配依据和错误，支持筛选与主站分流不同的域名。
+- 新增：批量试用代理或直连规则，支持返回网页验证、撤销和保存正式规则；临时试用 10 分钟到期，不自动覆盖冲突的手动规则或切换代理模式。
+- 界面：弹窗内快速处理，完整诊断页始终绑定原标签页；支持深浅色及英文、简体中文、西班牙语、俄语，沿用插件语言设置。
+- 隐私：请求观察为可选权限，默认不采集；仅采集指定普通标签页，单次最多 60 秒，不支持无痕模式。摘要仅保存在本地，30 分钟后清理，不记录完整 URL、Cookie 或请求正文，不参加配置导出或云备份。
+- 说明：规则线路不等于实际出口，HTTP 成功不等于验证通过；临时和正式域名规则均可能影响其他页面对这些域名及其子域名的请求，不保证 Cloudflare 验证通过。
+- 兼容性：现有配置无需迁移，最低支持 Chrome 95；新增 `alarms` 用于过期清理，`webRequest` 仅在首次主动采集时申请。
+- 验证：174 项自动化测试通过；真实 Chromium 验证跨域请求采集、实际代理转发、撤销、保存以及中英文和深浅色界面。
+
+### English
+
+- Added **Current page requests** in the popup and a detailed diagnostics page. User-initiated captures summarize request domains, predicted routes, matching rules, and errors, with a filter for routes differing from the main site's.
+- Added batch proxy/direct trials with return-to-page verification, undo, and permanent rule saving. Trials expire after 10 minutes without silently overriding conflicting manual rules or changing the proxy mode.
+- UI: quick actions stay in the popup; the full diagnostics page remains bound to the original tab. Light/dark themes and English, Simplified Chinese, Spanish, and Russian follow the extension's language setting.
+- Privacy: request observation uses an optional permission and is off by default. Each capture observes one selected normal tab for up to 60 seconds; incognito is not supported. Local summaries are cleaned up after 30 minutes, exclude full URLs, cookies, and request bodies, and are not included in configuration exports or cloud backups.
+- Clarified that predicted routes do not prove the actual exit, and HTTP success does not prove a challenge succeeded. Trial and permanent rules also affect other pages requesting these domains and their subdomains; passing Cloudflare verification is not guaranteed.
+- Compatibility: existing settings need no migration; Chrome 95 remains the minimum. Added `alarms` for expiry cleanup; optional `webRequest` access is requested only when the user starts a capture for the first time.
+- Validation: all 174 automated tests passed. Real Chromium verified cross-domain capture, actual proxy forwarding, undo, permanent saving, Chinese/English text, and light/dark layouts.
+
 ## v7.10.0 — 2026-09-28
 
 ### 中文

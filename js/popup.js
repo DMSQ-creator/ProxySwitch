@@ -129,7 +129,7 @@ function sendMessageWithTimeout(message, timeoutMs, label) {
 
 
 // 监听配置变化（仅监听与 UI 相关的键，忽略黑匣子等诊断写入）
-const POPUP_RELEVANT_KEYS = ['serverList', 'activeServerId', 'userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'pacScriptData', 'appLanguage', 'theme'];
+const POPUP_RELEVANT_KEYS = ['serverList', 'activeServerId', 'userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'pacScriptData', 'diagnosticTrial', 'appLanguage', 'theme'];
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const changedKeys = Object.keys(changes);
@@ -509,7 +509,7 @@ function checkDomainStatusWrapper(isLoading) {
     recordPopupUiState(currentTabUrlKind);
     return;
   }
-  chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains'], (items) => {
+  chrome.storage.local.get(['userRules', 'tempRules', 'userWhitelist', 'gfwDomains', 'diagnosticTrial'], (items) => {
     if (requestId !== domainStatusRequestId) return;
     if (chrome.runtime.lastError) {
       PSL.error('popup', 'domain status storage.get failed', chrome.runtime.lastError.message);
@@ -574,6 +574,7 @@ function checkDomainStatus(items, opts) {
   let isProxy = false;
   let isWhite = false;
   let statusClass = "status-direct";
+  let diagnosticTrialActive = false;
 
   if (findWhitelistRule(currentTabDomain, whitelist)) {
     text = i18n("popStatusForceDirect"); 
@@ -603,6 +604,18 @@ function checkDomainStatus(items, opts) {
     statusClass = "status-direct";
   }
 
+  // Use the PAC's shared matching logic for diagnostic overlays; do not show a
+  // conflicting regular-rule badge or offer removal that cannot undo the trial.
+  if (currentMode === 'pac_script' && globalThis.ProxySwitchRouting && globalThis.ProxySwitchDiagnosticsI18n) {
+    const route = ProxySwitchRouting.evaluate(currentTabDomain, ProxySwitchRouting.prepare(items), { trial: items.diagnosticTrial });
+    if (route.source === 'trial') {
+      diagnosticTrialActive = true;
+      text = ProxySwitchDiagnosticsI18n.t('diagSourceTrial') + ' · ' + ProxySwitchDiagnosticsI18n.t(route.route === 'proxy' ? 'diagRouteProxy' : 'diagRouteDirect');
+      icon = '⏱️';
+      statusClass = 'status-temp';
+    }
+  }
+
   // Saved domain rules only control routing in Auto mode.
   if (currentMode === 'system') {
     text = i18n('popTitleSystem');
@@ -627,7 +640,10 @@ function checkDomainStatus(items, opts) {
   }
   
   refreshWhitelistUI(whitelist);
-  if (isWhite) {
+  if (diagnosticTrialActive) {
+    els.removeBtn.style.display = 'none';
+    els.addBtnGroup.style.display = 'none';
+  } else if (isWhite) {
     // Removing a direct exception must not erase underlying proxy rules.
     els.removeBtn.style.display = 'none';
     els.addBtnGroup.style.display = 'none';
