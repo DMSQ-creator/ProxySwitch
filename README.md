@@ -9,7 +9,7 @@ A Chrome extension for proxy switching, domain routing, and page request diagnos
 ![Manifest](https://img.shields.io/badge/Manifest-V3-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
-[中文说明](#中文说明) | [English](#english) | [下载 / Download](https://github.com/DMSQ-creator/ProxySwitch/releases/latest) | [更新说明 / Changelog](CHANGELOG.md) | [隐私政策 / Privacy](Privacy_Policy.md)
+[中文说明](#中文说明) | [English](#english) | [下载 / Download](https://github.com/DMSQ-creator/ProxySwitch/releases/latest) | [更新说明 / Changelog](CHANGELOG.md) | [隐私政策 / Privacy](Privacy.md)
 
 ---
 
@@ -47,7 +47,8 @@ A Chrome extension for proxy switching, domain routing, and page request diagnos
 ProxySwitch/
 ├── manifest.json             # 扩展配置与权限
 ├── CHANGELOG.md              # 中英双语更新说明
-├── Privacy_Policy.md         # 隐私政策
+├── Privacy.md                # 正式隐私政策
+├── Privacy_Policy.md         # 旧链接兼容入口
 ├── _locales/                 # en、zh_CN、es、ru 语言包
 ├── assets/
 │   ├── icon.png              # 扩展主图标
@@ -184,7 +185,7 @@ ProxySwitch/
 | `webRequest`（可选） | 首次采集时申请，随后仅在用户主动采集期间只读观察指定标签页的请求 |
 | HTTP/HTTPS 主机访问 | 更新用户指定的订阅、测试延迟、访问用户配置的备份服务，以及配合请求诊断观察权限 |
 
-页面请求诊断默认关闭，摘要仅本地暂存。云备份由用户主动配置，使用可读 JSON，GitHub Token 和 WebDAV 认证凭据不会写入备份；备份没有额外加密。完整说明见[隐私政策](Privacy_Policy.md)。
+页面请求诊断默认关闭，摘要仅本地暂存。云备份由用户主动配置，使用可读 JSON，GitHub Token 和 WebDAV 认证凭据不会写入备份；备份没有额外加密。完整说明见[隐私政策](Privacy.md)。
 
 ---
 
@@ -222,7 +223,8 @@ The main directory structure is shown below. Keep the complete release package w
 ProxySwitch/
 ├── manifest.json             # Extension configuration and permissions
 ├── CHANGELOG.md              # Bilingual release notes
-├── Privacy_Policy.md         # Privacy policy
+├── Privacy.md                # Official privacy policy
+├── Privacy_Policy.md         # Compatibility link for the old URL
 ├── _locales/                 # en, zh_CN, es, ru language packs
 ├── assets/
 │   ├── icon.png              # Main extension icon
@@ -359,7 +361,7 @@ Reports show the latest 500 runtime events and 20 worker boots, stored on your d
 | `webRequest` (optional) | Requested on the first capture; read-only observation of the selected tab during user-initiated captures |
 | HTTP/HTTPS host access | Download user-selected subscriptions, test latency, access configured backup services, and support request observation |
 
-Page request capture is off by default and summaries are kept locally for a limited time. Cloud backup is user-configured readable JSON. GitHub tokens and WebDAV authentication credentials are excluded from backups; backups are not additionally encrypted. See the [privacy policy](Privacy_Policy.md) for details.
+Page request capture is off by default and summaries are kept locally for a limited time. Cloud backup is user-configured readable JSON. GitHub tokens and WebDAV authentication credentials are excluded from backups; backups are not additionally encrypted. See the [privacy policy](Privacy.md) for details.
 
 ---
 

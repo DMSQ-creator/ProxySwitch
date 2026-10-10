@@ -34,17 +34,30 @@ ProxySwitch（以下简称“本扩展”）是一款旨在帮助用户管理代
 *   服务器列表、规则等配置以**可读 JSON** 上传；同步凭据不会写入备份，但本扩展不会对备份文件进行额外加密或 Base64 编码。
 *   您的 Token、密码或同步数据不会经过或存储在 ProxySwitch 开发者运营的服务器上。
 
-### 4. 第三方服务
+### 4. 权限使用说明
+
+*   **`proxy`（代理）：** 用于根据您的操作修改浏览器的代理设置（系统、直连、PAC 或固定服务器）。
+*   **`storage`（存储）：** 用于在您的设备本地保存设置、规则、界面偏好和诊断摘要。
+*   **`tabs`（标签页）：** 用于获取当前页面域名、显示依据规则计算的线路状态，并将诊断绑定到原标签页，在您操作时刷新或返回该页面。
+*   **`webRequest`（可选，请求观察）：** 仅在您授权并主动开启页面诊断后，用于观察选定标签页的请求生命周期、类型、状态码与错误，不拦截或修改请求。
+*   **`alarms`（定时任务）：** 用于在采集到期时结束请求观察，并清理到期的诊断记录及临时试用状态，不用于自动开始采集。
+*   **主机权限（`http://*/*`、`https://*/*`）：** 用于下载您指定的规则列表、连接代理延迟测试目标、与您配置的备份服务通信，以及配合可选 `webRequest` 权限在您开启诊断时观察目标标签页的请求。
+
+### 5. 第三方服务
 根据您的配置，本扩展可能会与以下第三方服务交互：
 *   **GitHub：** 如果您使用 Gist 同步或从 GitHub 获取规则。
 *   **用户自定义的 WebDAV 服务器：** 如果您配置了 WebDAV 同步。
 *   **规则列表提供方：** 您输入的用于下载代理规则的任何 URL（如 jsDelivr）。
 请参阅这些相应服务的隐私政策。
 
-### 5. 数据安全
+### 6. 数据安全
 您的设置和诊断记录存储在浏览器的本地存储沙盒中。云备份是可读 JSON，安全性取决于您选择的服务、访问权限和传输方式；请使用私有 Gist 或受保护的 WebDAV，并优先使用 HTTPS。
 
-### 6. 联系我们
+### 7. 政策变更
+
+我们会不时更新本隐私政策。如果我们进行重大更改，将通过扩展程序的更新说明或 Chrome 网上应用店列表通知用户。
+
+### 8. 联系我们
 如果您对本隐私政策有任何疑问，请通过以下方式联系我们：
 **xcyebgkob@mozmail.com**
 
@@ -86,16 +99,29 @@ If you choose to use the "Cloud Sync" feature (GitHub Gist or WebDAV):
 *   Configuration such as server lists and rules is uploaded as **readable JSON**. Sync credentials are excluded from the backup, but the extension does not additionally encrypt or Base64-encode the backup file.
 *   Your tokens, passwords, and synchronized data do not pass through or reside on servers operated by the ProxySwitch developers.
 
-### 4. Third-Party Services
+### 4. Permissions Usage
+
+*   **`proxy`:** Modifies the browser's proxy settings (System, Direct, PAC, or fixed servers) as requested by you.
+*   **`storage`:** Saves settings, rules, UI preferences, and diagnostic summaries locally on your device.
+*   **`tabs`:** Reads the current page's hostname to show a predicted rule route, binds diagnostics to the source tab, and reloads or returns to that page when requested.
+*   **`webRequest` (Optional):** Observes the selected tab's request lifecycle, types, status codes, and errors only after you grant permission and start page diagnostics. It does not intercept or modify requests.
+*   **`alarms`:** Ends request observation when a capture expires and cleans up expired diagnostic records and temporary trial state; does not start captures automatically.
+*   **Host permissions (`http://*/*`, `https://*/*`):** Downloads your chosen rule lists, connects to proxy latency-test targets, communicates with your configured backup service, and works with the optional `webRequest` permission to observe the selected tab's requests when you start diagnostics.
+
+### 5. Third-Party Services
 The extension may interact with the following third-party services based on your configuration:
 *   **GitHub:** If you use GitHub Gist for sync or fetch rules from GitHub.
 *   **User-defined WebDAV Servers:** If you configure WebDAV sync.
 *   **Rule List Providers:** Any URL you input to download proxy rules (e.g., jsDelivr).
 Please refer to the privacy policies of these respective services.
 
-### 5. Data Security
+### 6. Data Security
 Your settings and diagnostic records are stored in the browser's local storage sandbox. Cloud backups are readable JSON, so their security depends on your chosen provider, access controls, and transport. Use a private Gist or protected WebDAV service and prefer HTTPS.
 
-### 6. Contact Us
+### 7. Changes to This Policy
+
+We may update this Privacy Policy from time to time. If we make significant changes, we will notify users through the extension's update notes or the Chrome Web Store listing.
+
+### 8. Contact Us
 If you have any questions about this Privacy Policy, please contact us at:
 **xcyebgkob@mozmail.com**
