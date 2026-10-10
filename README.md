@@ -48,7 +48,6 @@ ProxySwitch/
 ├── manifest.json             # 扩展配置与权限
 ├── CHANGELOG.md              # 中英双语更新说明
 ├── Privacy.md                # 正式隐私政策
-├── Privacy_Policy.md         # 旧链接兼容入口
 ├── _locales/                 # en、zh_CN、es、ru 语言包
 ├── assets/
 │   ├── icon.png              # 扩展主图标
@@ -224,7 +223,6 @@ ProxySwitch/
 ├── manifest.json             # Extension configuration and permissions
 ├── CHANGELOG.md              # Bilingual release notes
 ├── Privacy.md                # Official privacy policy
-├── Privacy_Policy.md         # Compatibility link for the old URL
 ├── _locales/                 # en, zh_CN, es, ru language packs
 ├── assets/
 │   ├── icon.png              # Main extension icon
