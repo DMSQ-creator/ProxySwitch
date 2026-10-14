@@ -3,314 +3,73 @@
 <head>
   <meta charset="UTF-8">
   <script src="../js/page-boot.js"></script>
+  <link rel="stylesheet" href="../assets/theme.css">
   <link rel="stylesheet" href="../assets/diagnostics.css">
-  <style>
-    :root {
-      /* 核心变量 */
-      --primary: #0ea5e9;
-      --primary-hover: #0284c7;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --purple: #8b5cf6;
-      
-      --bg-body: #f8fafc;
-      --bg-card: #ffffff;
-      
-      --text-main: #0f172a;
-      --text-sub: #64748b;
-      --border: #e2e8f0;
-      
-      --radius: 10px;
-    }
-
-    /* 深色模式适配 */
-    html[data-theme="dark"] {
-      --primary: #38bdf8;
-      --bg-body: #0f172a;
-      --bg-card: #1e293b;
-      --text-main: #f1f5f9;
-      --text-sub: #94a3b8;
-      --border: #334155;
-    }
-
-    body {
-        width: 340px; 
-        min-height: 370px;
-        margin: 0; 
-        padding: 0;
-        overflow-x: hidden; 
-        overflow-y: auto;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: var(--bg-body); 
-        color: var(--text-main);
-        display: flex; 
-        flex-direction: column;
-    }
-
-    #app { display: flex; flex-direction: column; min-height: 370px; }
-
-    /* --- 顶部导航 --- */
-    .header {
-      padding: 12px 16px; 
-      background: var(--bg-card);
-      display: flex; justify-content: space-between; align-items: center;
-      border-bottom: 1px solid var(--border); z-index: 10;
-    }
-    .brand { font-weight: 800; font-size: 15px; display: flex; align-items: center; gap: 8px; color: var(--text-main); }
-
-    .server-wrapper { position: relative; }
-    .server-select {
-      appearance: none; background: var(--bg-body); color: var(--text-main);
-      border: 1px solid var(--border); border-radius: 20px;
-      padding: 4px 28px 4px 12px; font-size: 12px; font-weight: 600;
-      cursor: pointer; outline: none; transition: 0.2s; max-width: 130px;
-      text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
-    }
-    .server-select:hover { border-color: var(--primary); background: var(--bg-card); }
-    .server-arrow {
-      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-      pointer-events: none; font-size: 10px; color: var(--text-sub);
-    }
-
-    /* --- 内容区域 --- */
-    .content {
-      flex: 1; 
-      padding: 16px 20px 8px 20px; 
-      display: flex; flex-direction: column; 
-      justify-content: flex-start;
-    }
-
-    /* --- 状态卡片 --- */
-    .domain-card {
-      display: flex !important;
-      flex-direction: row !important;
-      align-items: center !important;
-      justify-content: flex-start !important;
-      width: 100%;
-      padding: 12px 16px;
-      background: var(--bg-card);
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      margin-bottom: 16px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-      text-align: left;
-    }
-
-    .icon-wrapper {
-      width: 40px; height: 40px; 
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 22px; 
-      margin-right: 14px !important;
-      flex-shrink: 0;
-      transition: 0.3s;
-    }
-
-    .info-content {
-      flex: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden;
-    }
-
-    .domain-text {
-      font-size: 14px; font-weight: 700; color: var(--text-main);
-      line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-
-    .status-badge {
-      font-size: 11px; color: var(--text-sub); line-height: 1.4;
-    }
-
-    /* --- 状态颜色适配 (清爽白底版) --- */
-    
-    /* 1. GFWList (自动) - 绿色 */
-    .domain-card.status-proxy { 
-        background: var(--bg-card); 
-        border-color: rgba(16, 185, 129, 0.4); 
-    }
-    .domain-card.status-proxy .icon-wrapper { background: var(--success); color: #fff; }
-    .domain-card.status-proxy .status-badge { color: var(--success); font-weight: 600; }
-
-    /* 2. 直连/白名单 - 蓝色 */
-    .domain-card.status-direct { 
-        background: var(--bg-card); 
-        border-color: rgba(14, 165, 233, 0.4); 
-    }
-    .domain-card.status-direct .icon-wrapper { background: var(--primary); color: #fff; }
-    .domain-card.status-direct .status-badge { color: var(--primary); font-weight: 600; }
-
-    /* 3. 用户强制代理 - 紫色 */
-    .domain-card.status-user { 
-        background: var(--bg-card); 
-        border-color: rgba(139, 92, 246, 0.4); 
-    }
-    .domain-card.status-user .icon-wrapper { background: var(--purple); color: #fff; }
-    .domain-card.status-user .status-badge { color: var(--purple); font-weight: 600; }
-
-    /* 4. 临时代理 - 橙色 */
-    .domain-card.status-temp { 
-        background: var(--bg-card); 
-        border-color: rgba(245, 158, 11, 0.4); 
-    }
-    .domain-card.status-temp .icon-wrapper { background: var(--warning); color: #fff; }
-    .domain-card.status-temp .status-badge { color: var(--warning); font-weight: 600; }
-
-    /* 5. 失败/无效 - 红色 */
-    .domain-card.status-fail { 
-        background: var(--bg-card);
-        border-color: var(--border); 
-        opacity: 0.8; 
-    }
-    .domain-card.status-fail .icon-wrapper { background: #fee2e2; color: var(--danger); }
-    .domain-card.status-fail .status-badge { color: var(--danger); font-weight: 600; }
-
-
-    /* --- 模式切换 --- */
-    .mode-label {
-      margin-top: 2px; margin-bottom: 8px;
-      font-size: 12px; color: var(--text-sub); padding-left: 2px;
-    }
-    
-    .segmented-control {
-      display: flex; background: #e2e8f0; 
-      padding: 4px; border-radius: 10px; gap: 4px; width: 100%;
-      margin-bottom: 10px;
-    }
-    html[data-theme="dark"] .segmented-control { background: #1e293b; }
-
-    .mode-btn {
-      flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-      padding: 6px 0; border-radius: 8px; font-size: 12px; font-weight: 600;
-      color: var(--text-sub); cursor: pointer; transition: all 0.2s ease; user-select: none;
-    }
-    .mode-btn span { font-size: 14px; filter: grayscale(100%); opacity: 0.8; }
-    .mode-btn:hover { background: rgba(255, 255, 255, 0.5); color: var(--text-main); }
-    
-    .mode-btn.active { background: var(--bg-card); color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    html[data-theme="dark"] .mode-btn.active { background: #334155; color: #fff; }
-    .mode-btn.active span { filter: none; opacity: 1; transform: scale(1.1); }
-    
-    #mode-pac.active { color: var(--primary); }
-    #mode-fixed.active { color: var(--success); }
-    #mode-direct.active { color: var(--text-sub); }
-    #mode-system.active { color: #64748b; }
-
-    /* --- 底部操作区 --- */
-    #actionArea { margin-top: auto; margin-bottom: 12px; width: 100%; }
-
-    .btn-action {
-      padding: 0; height: 40px; 
-      border-radius: var(--radius); border: none;
-      font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-    }
-    .btn-action:active { transform: scale(0.98); }
-    .btn-action:disabled { cursor: default; opacity: 0.65; transform: none; }
-    .btn-action:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-
-    .whitelist-area { margin-bottom: 10px; }
-    .whitelist-actions { display: flex; gap: 8px; }
-    .btn-whitelist { flex: 1; background: var(--bg-card); color: var(--primary); border: 1px solid var(--primary); }
-    .btn-whitelist:hover:not(:disabled) { background: var(--bg-body); }
-    .btn-undo { padding: 0 12px; background: var(--bg-card); color: var(--text-sub); border: 1px solid var(--border); }
-    .rule-hint, .rule-message { margin: 6px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
-    .rule-message { color: var(--primary); }
-    .rule-message.error { color: var(--danger); }
-    
-    .btn-add { background: var(--primary); color: white; box-shadow: 0 4px 10px rgba(14, 165, 233, 0.3); }
-    .btn-add:hover { background: var(--primary-hover); }
-    
-    .btn-temp { background: #fff7ed; color: #f59e0b; border: 1px solid #fed7aa; }
-    .btn-temp:hover { background: #ffedd5; border-color: #fbbf24; }
-    
-    .btn-remove { 
-      background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; box-shadow: none;
-      width: 100%;
-    }
-    .btn-remove:hover { background: #fee2e2; border-color: #fca5a5; }
-
-    /* --- Footer --- */
-    .footer {
-      padding: 10px; background: var(--bg-card); border-top: 1px solid var(--border);
-      text-align: center; font-size: 12px; font-weight: 600; color: var(--text-sub);
-      cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;
-    }
-    .footer:hover { background: var(--bg-body); color: var(--primary); }
-
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    * { box-sizing: border-box; }
-  </style>
+  <link rel="stylesheet" href="../assets/popup.css">
+  <script src="../js/ui.js"></script>
 </head>
 <body>
   <div id="app">
-    <div class="header">
-      <div class="brand"><img src="../assets/icon.png" style="width:20px; height:20px;"> __MSG_appName__</div>
+    <header class="header">
+      <div class="brand"><img src="../assets/icon.png" alt="" width="22" height="22"><span>__MSG_appName__</span></div>
       <div class="server-wrapper">
-        <select id="serverSelect" class="server-select"></select>
-        <span class="server-arrow">▼</span>
+        <select id="serverSelect" class="server-select" aria-label="__MSG_menuServer__"></select>
+        <span class="server-arrow" data-icon="chevron-down" aria-hidden="true"></span>
       </div>
-    </div>
-    
-    <div class="content">
-      <!-- 状态卡片 -->
-      <div class="domain-card" id="domainArea" style="display:none;">
-        <div class="icon-wrapper" id="statusRing"><span id="statusIcon">🚀</span></div>
-        <div class="info-content">
-          <div id="currentDomain" class="domain-text">google.com</div>
-          <div id="routingStatus" class="status-badge">...</div>
+    </header>
+    <main class="content">
+      <section class="domain-card" id="domainArea" aria-labelledby="currentDomain" aria-describedby="routingStatus" style="display:none;">
+        <div id="domainHeading" class="domain-heading"><span id="statusIcon" class="status-icon" data-icon="route" aria-hidden="true"></span><div id="currentDomain" class="domain-text"></div><button id="routingDetailsBtn" class="info-button" type="button" aria-label="__MSG_popRoutingDetails__" aria-expanded="false" aria-controls="routingDetails"><span data-icon="info" aria-hidden="true"></span></button></div>
+        <span id="routingStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></span>
+        <span id="pageLoadingState" class="loading-state" style="display:none;"></span>
+        <div id="routingDetails" class="routing-details" hidden>
+          <p id="routingDetailsText"></p>
+          <p class="route-disclaimer">__MSG_popExpectedRoutingHint__</p>
+          <p id="routingScopeText"></p>
         </div>
-      </div>
-
-      <!-- 模式切换 -->
-      <div class="mode-label">__MSG_popModeLabel__</div>
-      <div class="mode-group segmented-control">
-        <div class="mode-btn" id="mode-pac" title="__MSG_popTitleAuto__"><span>🤖</span> __MSG_popModeAuto__</div>
-        <div class="mode-btn" id="mode-fixed" title="__MSG_popTitleGlobal__"><span>🚀</span> __MSG_popModeGlobal__</div>
-        <div class="mode-btn" id="mode-direct" title="__MSG_popTitleDirect__"><span>🛡️</span> __MSG_popModeDirect__</div>
-        <div class="mode-btn" id="mode-system" title="__MSG_popTitleSystem__"><span>💻</span> __MSG_popModeSystem__</div>
-      </div>
-      
-      <!-- 操作按钮区 -->
-      <div id="actionArea">
-        <div id="whitelistArea" class="whitelist-area" style="display:none;">
-          <div class="whitelist-actions">
-            <button id="addWhitelistBtn" class="btn-action btn-whitelist" type="button">
-              <span aria-hidden="true">🛡️</span><span id="whitelistButtonLabel"></span>
-            </button>
-            <button id="removeWhitelistBtn" class="btn-action btn-undo" type="button" style="display:none;">__MSG_popBtnUndoWhitelist__</button>
+      </section>
+      <section class="mode-section" aria-labelledby="modeLabel">
+        <h2 id="modeLabel" class="section-label">__MSG_popModeLabel__</h2>
+        <div class="mode-group segmented-control" role="group" aria-label="__MSG_popModeLabel__">
+          <button type="button" class="mode-btn" id="mode-pac" aria-pressed="false" title="__MSG_popTitleAuto__">__MSG_popModeAuto__</button>
+          <button type="button" class="mode-btn" id="mode-fixed" aria-pressed="false" title="__MSG_popTitleGlobal__">__MSG_popModeGlobal__</button>
+          <button type="button" class="mode-btn" id="mode-direct" aria-pressed="false" title="__MSG_popTitleDirect__">__MSG_popModeDirect__</button>
+          <button type="button" class="mode-btn" id="mode-system" aria-pressed="false" title="__MSG_popTitleSystem__">__MSG_popModeSystem__</button>
+        </div>
+        <p id="proxyControlMessage" class="rule-message error" role="status" aria-live="polite" style="display:none;"></p>
+      </section>
+      <section id="actionArea" class="site-section" aria-labelledby="siteRulesLabel" style="display:none;">
+        <div class="section-heading"><h2 id="siteRulesLabel" class="section-label">__MSG_popSiteRulesLabel__</h2><span class="scope-caption">__MSG_popSiteScopeCompact__</span><button id="moreActionsBtn" class="more-toggle" type="button" aria-expanded="false" aria-controls="moreActions"><span>__MSG_popMoreActions__</span><span data-icon="chevron-down" aria-hidden="true"></span></button></div>
+        <div class="site-actions">
+          <div id="addBtnGroup" class="site-action-slot">
+            <button id="addRuleBtn" class="btn-action btn-add" type="button" aria-pressed="false"><span data-icon="route" aria-hidden="true"></span><span id="proxyButtonLabel">__MSG_popBtnSiteProxy__</span></button>
           </div>
-          <p id="whitelistHint" class="rule-hint"></p>
-          <p id="whitelistMessage" class="rule-message" role="status" aria-live="polite" style="display:none;"></p>
+          <div id="whitelistArea" class="site-action-slot" style="display:none;">
+            <button id="addWhitelistBtn" class="btn-action btn-whitelist" type="button" aria-pressed="false"><span data-icon="arrow-up-right" aria-hidden="true"></span><span id="whitelistButtonLabel"></span></button>
+          </div>
         </div>
-        <div id="addBtnGroup" style="display:flex; gap:10px; width:100%;">
-          <button id="addRuleBtn" class="btn-action btn-add" style="flex:2;">
-            <span style="font-size:16px;padding-top: 4px;">+</span> __MSG_popBtnAdd__
-          </button>
-          <button id="addTempRuleBtn" class="btn-action btn-temp" style="flex:1;" title="__MSG_popBtnTempHint__">
-            ⏱️ __MSG_popBtnTemp__
-          </button>
+        <div class="rule-exception"><div class="rule-exception-copy"><p id="whitelistHint" class="rule-hint" style="display:none;"></p><p id="ruleScopeHint" class="rule-hint" style="display:none;"></p></div><button id="exceptionManageRulesBtn" class="btn-secondary" type="button" hidden>__MSG_popManageRuleCompact__</button></div>
+        <div id="moreActions" class="site-secondary-actions" hidden>
+          <button id="addTempRuleBtn" class="btn-secondary" type="button" title="__MSG_popBtnTempHint__"><span data-icon="clock" aria-hidden="true"></span><span>__MSG_popBtnTemp__</span></button>
+          <button id="removeBtn" class="btn-secondary" type="button" style="display:none;"><span id="removeRuleIcon" data-icon="undo" aria-hidden="true"></span><span id="removeRuleLabel">__MSG_popBtnRemove__</span></button>
+          <button id="removeWhitelistBtn" class="btn-secondary" type="button" style="display:none;"><span data-icon="undo" aria-hidden="true"></span><span>__MSG_popBtnRemoveDirectRule__</span></button>
+          <button id="manageRulesBtn" class="btn-secondary" type="button"><span data-icon="list" aria-hidden="true"></span><span id="manageRulesLabel">__MSG_popBtnManageRule__</span></button>
         </div>
-
-        <button id="removeBtn" class="btn-action btn-remove" style="display:none;">
-          🗑️ __MSG_popBtnRemove__
-        </button>
-      </div>
-    </div>
-    
-    <div class="ps-diag ps-diag-entry-wrap">
-      <button id="diagnosticsEntry" class="ps-diag-entry" type="button" aria-controls="diagnosticsRoot">
-        <svg class="ps-diag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h7"/><circle cx="18" cy="17" r="3"/><path d="m20 19 2 2"/></svg>
+        <p id="whitelistMessage" class="rule-message" role="status" aria-live="polite" style="display:none;"></p>
+      </section>
+      <p id="operationMessage" class="rule-message" role="status" aria-live="polite" style="display:none;"></p>
+    </main>
+    <footer class="popup-footer">
+      <button id="diagnosticsEntry" class="ps-diag ps-diag-entry" type="button" aria-controls="diagnosticsRoot">
+        <span class="ps-diag-icon" data-icon="list" aria-hidden="true"></span>
         <span class="ps-diag-entry-copy"><span id="diagnosticsEntryTitle">Page requests</span><small id="diagnosticsEntryHint">View request domains and routing rules</small></span>
-        <svg class="ps-diag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+        <span class="ps-diag-icon" data-icon="chevron-right" aria-hidden="true"></span>
       </button>
-      <div id="diagnosticsHomeTrial"></div>
-    </div>
-    <div class="footer" id="openSettings">
-      <span style="font-size:14px">⚙️</span> __MSG_popFooter__
-    </div>
+      <button type="button" class="footer" id="openSettings"><span data-icon="settings" aria-hidden="true"></span><span>__MSG_popFooter__</span></button>
+    </footer>
+    <div id="diagnosticsHomeTrial" class="ps-diag home-trial"></div>
   </div>
   <section id="diagnosticsRoot" class="ps-diag" hidden></section>
-
   <script src="../js/utils.js"></script>
   <script src="../js/logger.js"></script>
   <script src="../js/routing.js"></script>

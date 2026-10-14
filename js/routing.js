@@ -48,6 +48,24 @@
     return regex.test(host) || regex.test('.' + host);
   }
   function localHost(host) {
+    host = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+    if (host.indexOf(':') >= 0) {
+      // IPv6 literals are not plain local hostnames. Only local address ranges bypass proxy rules.
+      var embedded = host.match(/^(?:::ffff:)([0-9.]+)$/);
+      if (embedded) return localHost(embedded[1]);
+      var halves = host.split('::');
+      if (halves.length > 2) return false;
+      var left = halves[0] ? halves[0].split(':') : [];
+      var right = halves.length > 1 && halves[1] ? halves[1].split(':') : [];
+      var groups = left.concat(right);
+      if (groups.some(function (part) { return !/^[0-9a-f]{1,4}$/.test(part); })) return false;
+      if (halves.length === 1 && groups.length !== 8 || groups.length > 8) return false;
+      while (left.length + right.length < 8) left.push('0');
+      groups = left.concat(right).map(function (part) { return parseInt(part, 16); });
+      var first = groups[0];
+      return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 ||
+        groups.slice(0, 7).every(function (part) { return part === 0; }) && (groups[7] === 0 || groups[7] === 1);
+    }
     if (host.indexOf('.') < 0 || /\.local$/.test(host)) return true;
     if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(host)) return false;
     var octets = host.split('.').map(Number);
@@ -131,7 +149,7 @@
     let port = parseInt(server.port, 10);
     if (!Number.isInteger(port) || port < 1 || port > 65535) port = 1080;
     const scheme = String(server.scheme || 'SOCKS5').toUpperCase();
-    const protocol = scheme === 'HTTP' || scheme === 'HTTPS' ? 'PROXY' : scheme === 'SOCKS4' ? 'SOCKS' : 'SOCKS5';
+    const protocol = scheme === 'HTTPS' ? 'HTTPS' : scheme === 'HTTP' ? 'PROXY' : scheme === 'SOCKS4' ? 'SOCKS' : 'SOCKS5';
     const proxy = protocol + ' ' + host + ':' + port + '; DIRECT';
     return [
       'var psRules = ' + JSON.stringify(rules) + ';',
@@ -141,7 +159,7 @@
       'function FindProxyForURL(url, host) { return evaluate(host, psRules, { trial: psTrial, now: Date.now() }).route === "proxy" ? Proxy : "DIRECT"; }',
     ].join('\n');
   }
-  const api = { normalizeRules, prepare, evaluate, conflict, buildPac, hostname, localHost, activeTrial };
+  const api = { normalizeRules, prepare, evaluate, conflict, buildPac, hostname, localHost, activeTrial, safeTrial };
   root.ProxySwitchRouting = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

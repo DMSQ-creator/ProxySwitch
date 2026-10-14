@@ -1,0 +1,13 @@
+{
+  "name": "proxyswitch",
+  "version": "7.14.0",
+  "private": true,
+  "description": "Development checks for the ProxySwitch browser extension",
+  "scripts": {
+    "test": "node --test",
+    "check:release": "node tools/check-release.cjs",
+    "test:integration": "node tools/run-integration.cjs"
+  },
+  "engines": { "node": ">=20.19.0" },
+  "devDependencies": { "playwright": "1.62.1" }
+}

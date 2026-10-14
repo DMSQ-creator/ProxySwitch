@@ -72,8 +72,8 @@ test('stored Simplified Chinese takes precedence over English Chrome', async () 
   const { api, timers } = harness({ stored: 'zh_CN' });
   assert.equal(await api.ready, api);
   assert.equal(api.getLanguage(), 'zh_CN');
-  assert.equal(api.t('diagEntry'), '当前页面请求');
-  assert.equal(api.t('diagSelected', { count: 2 }), '已选 2 个域名');
+  assert.equal(api.t('diagEntry'), '页面请求');
+  assert.equal(api.t('diagSelected', { count: 2 }), '已选 2 个 · 含子域名');
   assert.equal(timers.size, 0);
 });
 
@@ -115,12 +115,12 @@ test('slow initial language read cannot overwrite a newer user selection', async
 
 test('hung storage has bounded readiness and a late read still updates the language', async () => {
   const { api, expireTimers, resolveRead, timers } = harness({ delayed: true });
-  assert.equal(api.t('diagEntry'), 'Current page requests');
+  assert.equal(api.t('diagEntry'), 'Page requests');
   expireTimers();
   assert.equal(await api.ready, api);
   assert.equal(timers.size, 0);
   resolveRead('zh_CN');
-  assert.equal(api.t('diagEntry'), '当前页面请求');
+  assert.equal(api.t('diagEntry'), '页面请求');
 });
 
 test('storage errors retain browser-language strings and do not block startup', async () => {
@@ -133,6 +133,59 @@ test('storage errors retain browser-language strings and do not block startup', 
 test('substitution treats values as literal text, including dollar signs and markup', () => {
   const { api } = harness();
   assert.equal(api.t('diagSelect', { host: '$&<example.test>' }), 'Select $&<example.test>');
-  assert.equal(api.t('diagSelected'), '{count} domains selected');
+  assert.equal(api.t('diagSelected'), '{count} selected · includes subdomains');
   assert.equal(api.t('nonexistent'), 'nonexistent');
+});
+
+test('all locales describe WebSocket handshake facts without treating the aggregate counts as connection success', () => {
+  for (const locale of ['en', 'zh_CN', 'es', 'ru']) {
+    const { api } = harness({ stored: locale });
+    assert.equal(api.t('diagWebSocket'), 'WebSocket');
+    assert.match(api.t('diagCaptureHint'), /WebSocket/);
+    assert.match(api.t('diagWebSocketHint'), /HTTP 101/);
+    for (const key of ['diagWebSocketPending', 'diagWebSocketCompleted', 'diagMixedPending', 'diagMixedCompleted']) {
+      assert.match(api.t(key, { count: 7 }), /7/);
+      assert.doesNotMatch(api.t(key, { count: 7 }), /\{count\}|diag[A-Z]/);
+    }
+    assert.notEqual(api.t('diagMixedCompleted'), api.t('diagWebSocketCompleted'));
+    assert.notEqual(api.t('diagMixedPending'), api.t('diagWebSocketPending'));
+  }
+});
+
+test('every locale distinguishes adding rules, optional trial, undo, and unconfirmed proxy application', () => {
+  const keys = ['diagAddProxy', 'diagAddDirect', 'diagReview', 'diagRulesAdded', 'diagRulesUndone', 'diagRulesPending', 'diagRulesUndoPending', 'diagRulesUnconfirmed', 'diagUndoRules', 'diagRetryApply', 'diagUndoUnavailable', 'diagOtherRulesPending', 'diagErrorUndoNotFound', 'diagErrorUndoConflict', 'diagErrorInvalidRules'];
+  for (const locale of ['en', 'zh_CN', 'es', 'ru']) {
+    const { api } = harness({ stored: locale });
+    for (const key of keys) {
+      assert.ok(api.t(key).trim());
+      assert.doesNotMatch(api.t(key), /diag[A-Z]|\{\w+\}/);
+    }
+    assert.notEqual(api.t('diagAddProxy'), api.t('diagReview'));
+    assert.notEqual(api.t('diagAddProxy'), api.t('diagAddDirect'));
+    assert.notEqual(api.t('diagRulesAdded'), api.t('diagRulesPending'));
+    assert.notEqual(api.t('diagRulesPending'), api.t('diagRulesUndoPending'));
+    assert.notEqual(api.t('diagUndoRules'), api.t('diagUndo'));
+  }
+  const zh = harness({ stored: 'zh_CN' }).api;
+  assert.equal(zh.t('diagAddProxy'), '添加代理规则');
+  assert.equal(zh.t('diagReview'), '临时试用');
+  assert.match(zh.t('diagRulesPending'), /规则已保存.*尚未确认/);
+  assert.match(zh.t('diagRulesUnconfirmed'), /没有重复提交/);
+});
+
+test('automatic consent, privacy, empty records and unknown outcomes have complete local translations', () => {
+  const keys = ['diagAutoTitle', 'diagAutoEnable', 'diagAutoDisable', 'diagAutoScope', 'diagAutoPrivacy', 'diagAutoNoRecords', 'diagAutoEarlier', 'diagReload', 'diagAutoMemory', 'diagAutoPermissionDenied'];
+  for (const locale of ['en', 'zh_CN', 'es', 'ru']) {
+    const { api } = harness({ stored: locale });
+    for (const key of keys) { assert.ok(api.t(key).trim()); assert.doesNotMatch(api.t(key), /diag[A-Z]|\{\w+\}/); }
+    assert.match(api.t('diagAutoScope'), /HTTP.*WebSocket/);
+    for (const key of ['diagAutoActive', 'diagEntryFailures', 'diagEntryDomains', 'diagUnconfirmed']) {
+      assert.match(api.t(key, { count: 9 }), /9/); assert.doesNotMatch(api.t(key, { count: 9 }), /\{count\}/);
+    }
+    assert.notEqual(api.t('diagAutoEnable'), api.t('diagReload'));
+    assert.notEqual(api.t('diagUnconfirmed'), api.t('diagFailed'));
+  }
+  const en = harness({ stored: 'en' }).api;
+  assert.match(en.t('diagAutoPrivacy'), /not stored or uploaded.*Incognito/);
+  assert.match(en.t('diagAutoEarlier'), /Earlier requests cannot be recovered/);
 });

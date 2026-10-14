@@ -1,10 +1,7 @@
 // js/background.js - ProxySwitch
-// ⚠️ MV3 Service Worker 生命周期提醒：
-//   - Chrome 会在空闲 ~30s 后终止 SW，setTimeout/setInterval 会丢失。
-//   - 短延时（<30s）操作如 debounce(500ms)、图标更新(50ms) 在实际使用中通常能完成。
-//   - 长延时如 triggerAutoUpload(10s) 若 SW 在当前事件结束后快速终止可能会丢失，
-//     但这是 MV3 的已知限制，对用户无感知影响。
-//   - chrome.alarms 最小间隔 30+ 秒，不适用于本扩展的延时需求。
+// MV3 listeners are registered synchronously before business initialization.
+// Proxy mutations share a serial queue; unacknowledged writes retain their lease.
+// Cloud work persists its pending state separately so worker suspension cannot erase it.
 const ProxySwitchBootJournal = (() => {
   const BOOT_PREFIX = '__psl_boot_v2__:';
   const bootId = (() => {
@@ -85,13 +82,16 @@ try {
   importScripts('logger.js');
   importScripts('utils.js');
   importScripts('routing.js');
+  importScripts('configuration.js');
+  importScripts('configuration-store.js');
+  importScripts('cloud-sync.js');
   coreModulesReady = true;
 } catch (e) {
   console.error('[ProxySwitch] Failed to load core modules — extension may not work correctly', e);
 }
 
 try {
-  importScripts('diagnostics-background.js');
+  importScripts('request-recorder.js', 'diagnostics-background.js');
 } catch (error) {
   console.error('[ProxySwitch] Request diagnostics unavailable', error);
 }
@@ -133,19 +133,35 @@ let cachedDiagnosticTrial = null;
 let cachedRoutingRules = null;
 let isSyncing = false;
 
-// 🔥 修复 Bug #1: PAC 死循环防护
+// All cache/PAC work is serialized. Configuration changes are never dropped while an API is pending.
 let isApplyingProxy = false;
+let proxyOperationActive = null;
+const proxyOperationQueue = [];
+let proxyConfigurationVersion = 0;
+const PROXY_OPERATION_TIMEOUT_MS = 8000;
 let lastPacHash = '';
 let pacUpdateVersion = 0;
 
 // 🔥 修复 Bug #4: 内存泄漏防护
 let uploadDebounceTimer = null;
-let debouncedUpdateTimer = null;
 
 // 图标像素在构建时生成。运行时只构造 ImageData，不触发 Canvas/GPU 读回。
 const STATIC_ICON_SIZES = Object.freeze([16, 32]);
 const staticIconImageDataCache = new Map();
 let currentProxyMode = 'direct';
+let currentProxyControl = 'unknown';
+let currentProxyError = null;
+let configurationStore = null;
+let configurationResetting = false;
+
+function getConfigurationStore() {
+  if (!configurationStore) configurationStore = ProxySwitchConfigurationStore.create({ chrome, configuration: ProxySwitchConfiguration });
+  return configurationStore;
+}
+
+function runConfigurationMutation(fn) {
+  return getConfigurationStore().run(fn);
+}
 
 // 🔥 修复 Bug #2: 竞态条件防护
 let activeTabId = null;
@@ -189,28 +205,23 @@ function simpleHash(str) {
   return Math.abs(hash).toString(36);
 }
 
-/**
- * 防抖函数（带清理）
- * 🔥 修复 Bug #4: 显式清理定时器引用
- */
-function debounce(func, wait) {
-  return function(...args) {
-    if (debouncedUpdateTimer) {
-      clearTimeout(debouncedUpdateTimer);
-      debouncedUpdateTimer = null;
-    }
-    debouncedUpdateTimer = setTimeout(() => {
-      debouncedUpdateTimer = null;
-      func.apply(this, args);
-    }, wait);
-  };
-}
-
-const debouncedUpdate = debounce(updateCacheAndApply, 500);
-
 function resolveActiveServer(items) {
-  const servers = items.serverList || [];
-  return servers.find(s => s.id === items.activeServerId) || servers[0] || null;
+  const servers = (Array.isArray(items && items.serverList) ? items.serverList : []).map(server => {
+    if (!server || typeof server !== 'object' || typeof server.host !== 'string') return null;
+    const scheme = typeof server.scheme === 'string' ? server.scheme.toUpperCase() : 'SOCKS5';
+    const port = typeof server.port === 'number' || typeof server.port === 'string' ? Number(server.port) : NaN;
+    if (!['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].includes(scheme) ||
+        !Number.isInteger(port) || port < 1 || port > 65535) return null;
+    let host = server.host.trim();
+    if (!host || /[\s/@?#\\]/.test(host)) return null;
+    try {
+      const parsed = new URL('http://' + (host.includes(':') && !host.startsWith('[') ? '[' + host + ']' : host));
+      if (!parsed.hostname || parsed.port || parsed.username || parsed.password) return null;
+      host = parsed.hostname;
+    } catch (_) { return null; }
+    return { ...server, scheme, host, port };
+  }).filter(Boolean);
+  return servers.find(server => server.id === (items && items.activeServerId)) || servers[0] || null;
 }
 
 function buildPacScriptString(activeServer) {
@@ -223,31 +234,31 @@ function buildPacScriptString(activeServer) {
   return ProxySwitchRouting.buildPac(activeServer, cachedRoutingRules, cachedDiagnosticTrial);
 }
 
-function persistPacScriptIfNeeded(items, pacScriptStr, callback) {
+function persistPacScriptIfNeeded(items, pacScriptStr, callback, stillActive = () => true, onWritePending = () => {}) {
   if (!pacScriptStr) {
     if (callback) callback();
     return;
   }
   const newPacHash = simpleHash(pacScriptStr);
-  const needsPersist = newPacHash !== lastPacHash || !items.pacScriptData;
+  // A short non-cryptographic hash is only metadata, not proof that rule scripts are identical.
+  const needsPersist = newPacHash !== lastPacHash || items.pacScriptData !== pacScriptStr;
   if (!needsPersist) {
     if (callback) callback();
     return;
   }
-  const wasApplyingProxy = isApplyingProxy;
-  isApplyingProxy = true;
   pacUpdateVersion++;
   const tSet = Date.now();
   let completed = false;
   const finish = (error) => {
-    if (completed) return;
+    if (completed || !stillActive()) return;
     completed = true;
+    onWritePending(false);
     PSL.perf('background', 'PAC persist set', tSet, `len=${pacScriptStr.length}`, 300);
     if (!error) lastPacHash = newPacHash;
-    isApplyingProxy = wasApplyingProxy;
     if (callback) callback(error);
   };
   try {
+    onWritePending(true);
     chrome.storage.local.set({
       pacScriptData: pacScriptStr,
       pacVersion: pacUpdateVersion,
@@ -260,24 +271,31 @@ function persistPacScriptIfNeeded(items, pacScriptStr, callback) {
 
 // ===== 初始化与监听 =====
 chrome.runtime.onInstalled.addListener(async (d) => {
-  if (d.reason === 'install') {
-    const items = await chrome.storage.local.get(['serverList']);
-    if (!items.serverList || items.serverList.length === 0) {
-      const def = { 
-        id: generateUUID(), 
-        name: 'Default', 
-        scheme: 'SOCKS5', 
-        host: '127.0.0.1', 
-        port: 10808 
-      };
-      await chrome.storage.local.set({ 
-        serverList: [def], 
-        activeServerId: def.id 
-      });
-    }
-    chrome.runtime.openOptionsPage();
+  try {
+    await runConfigurationMutation(async () => {
+      if (d.reason === 'install') {
+        const items = await chrome.storage.local.get(['serverList']);
+        if (!Array.isArray(items.serverList) || items.serverList.length === 0) {
+          const def = { id: generateUUID(), name: 'Default', scheme: 'SOCKS5', host: '127.0.0.1', port: 10808 };
+          await chrome.storage.local.set({ serverList: [def], activeServerId: def.id });
+        }
+        chrome.runtime.openOptionsPage();
+      }
+    });
+    updateCacheAndApply();
+  } catch (error) {
+    PSL.error('background', 'Install initialization failed', error.message || String(error));
   }
-  updateCacheAndApply();
+});
+
+// Browser-session rules expire on a real browser startup, not on every MV3 worker wake.
+if (chrome.runtime.onStartup) chrome.runtime.onStartup.addListener(async () => {
+  try {
+    await runConfigurationMutation(() => chrome.storage.local.set({ tempRules: [] }));
+    updateCacheAndApply();
+  } catch (error) {
+    PSL.error('background', 'Temporary rule startup cleanup failed', error.message || String(error));
+  }
 });
 
 // ===== Storage 变化监听（修复死循环） =====
@@ -292,32 +310,74 @@ const AUTO_UPDATE_KEYS = [
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace !== 'local') return;
+  if (typeof notifyCloudConfigurationChange === 'function') notifyCloudConfigurationChange(changes);
 
   const changedKeys = Object.keys(changes);
   const hasConfigChange = changedKeys.some(key => AUTO_UPDATE_KEYS.includes(key));
   // Diagnostic records and unrelated settings must not enter proxy-update logic or create log recursion.
   if (!hasConfigChange) return;
   
-  // 🔥 修复 Bug #1.1: 如果正在应用代理设置，跳过此次更新
-  if (isApplyingProxy) {
-    PSL.info('background', 'Skipping storage update: proxy application in progress');
-    return;
-  }
-
+  proxyConfigurationVersion++;
   PSL.info('background', 'Config changed', changedKeys.join(', '));
-  debouncedUpdate();
-  
-  // 处理自动同步逻辑
-  if (!isSyncing && (changes.userRules || changes.userWhitelist || changes.serverList)) {
-    chrome.storage.local.get(['autoSync'], (s) => {
-      if (s.autoSync) triggerAutoUpload();
-    });
-  }
+  updateCacheAndApply();
 });
 
 // ===== 消息监听 =====
 chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
-  if (m.type === 'REFRESH_PROXY') {
+  if (m.type === 'SAVE_CONFIGURATION') {
+    if (configurationResetting) {
+      sendResponse({ success: false, error: 'config_resetting' });
+      return;
+    }
+    try {
+      getConfigurationStore().save(m.items, m.expected).then(items => sendResponse({ success: true, items })).catch(error => {
+        const code = error && error.code || 'storage_failed';
+        PSL.warn('background', 'Configuration save rejected', { code, field: error && error.field });
+        sendResponse({ success: false, error: code });
+      });
+    } catch (_) { sendResponse({ success: false, error: 'storage_failed' }); }
+    return true;
+  } else if (m.type === 'RESET_CONFIGURATION') {
+    if (configurationResetting) {
+      sendResponse({ success: false, error: 'config_resetting' });
+      return;
+    }
+    // Fence new UI writes immediately; clear waits behind any restore/write lease.
+    // Keep the fence after success until the requesting UI reloads the extension.
+    configurationResetting = true;
+    // Removing storage alone would leave an already-installed PAC active. Release only
+    // this extension's browser setting first, behind any outstanding proxy write lease.
+    const stopDiagnostics = diagnosticsController ? diagnosticsController.beginReset() : Promise.resolve();
+    stopDiagnostics.then(() => new Promise((resolve, reject) => enqueueProxyOperation({ kind: 'release', done: error => error ? reject(error) : resolve() })))
+      .then(() => runConfigurationMutation(() => new Promise((resolve, reject) => {
+        try {
+          chrome.storage.local.clear(() => chrome.runtime.lastError ? reject(new Error('storage_failed')) : resolve());
+        } catch (_) { reject(new Error('storage_failed')); }
+      }))).then(() => sendResponse({ success: true, mode: currentProxyMode, levelOfControl: currentProxyControl })).catch(error => {
+      configurationResetting = false;
+      if (diagnosticsController) diagnosticsController.endReset(false);
+      const raw = error && (error.message || String(error));
+      sendResponse({ success: false, error: raw === 'proxy_operation_timeout' ? 'proxy_timeout' :
+        raw === 'storage_failed' ? 'storage_failed' : 'proxy_failed' });
+    });
+    return true;
+  } else if (m.type === 'SET_PROXY_MODE') {
+    if (configurationResetting) {
+      sendResponse({ success: false, error: 'config_resetting' });
+      return;
+    }
+    if (!['direct', 'system', 'fixed_servers', 'pac_script'].includes(m.mode)) {
+      sendResponse({ success: false, error: 'invalid_mode' });
+      return;
+    }
+    enqueueProxyOperation({ kind: 'user-mode', mode: m.mode, done: (error, _pac, status) => {
+      const raw = error && (error.message || String(error));
+      const code = raw === 'proxy_operation_timeout' ? 'proxy_timeout' :
+        ['no_server', 'proxy_uncontrolled', 'invalid_mode'].includes(raw) ? raw : 'proxy_failed';
+      sendResponse(error ? { success: false, error: code } : { success: true, ...status });
+    } });
+    return true;
+  } else if (m.type === 'REFRESH_PROXY') {
     const t0 = Date.now();
     refreshCacheAndIcon((error) => {
       PSL.perf('background', 'REFRESH_PROXY total', t0, null, 300);
@@ -326,29 +386,10 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
     return true;
   } else if (m.type === 'ENSURE_PAC') {
     const t0 = Date.now();
-    const tGet = Date.now();
-    chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
-      PSL.perf('background', 'ENSURE_PAC storage.get', tGet, null, 200);
-      cachedUserRules = normalizeSet(items.userRules);
-      cachedUserWhitelist = normalizeSet(items.userWhitelist);
-      cachedGfwDomains = normalizeSet(items.gfwDomains);
-      cachedTempRules = normalizeSet(items.tempRules);
-      cachedDiagnosticTrial = items.diagnosticTrial || null;
-      if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
-
-      const activeServer = resolveActiveServer(items);
-      const tBuild = Date.now();
-      const pacScriptStr = buildPacScriptString(activeServer);
-      PSL.perf('background', 'ENSURE_PAC buildPac', tBuild, `len=${pacScriptStr ? pacScriptStr.length : 0}`, 300);
-      if (!pacScriptStr) {
-        sendResponse({ success: false, error: 'no_server' });
-        return;
-      }
-      persistPacScriptIfNeeded(items, pacScriptStr, () => {
-        PSL.perf('background', 'ENSURE_PAC total', t0, null, 500);
-        sendResponse({ success: true, pacScriptData: pacScriptStr });
-      });
-    });
+    enqueueProxyOperation({ kind: 'ensure', done: (error, pacScriptData) => {
+      PSL.perf('background', 'ENSURE_PAC total', t0, null, 500);
+      sendResponse(error ? { success: false, error: error.message || String(error) } : { success: true, pacScriptData });
+    } });
     return true;
   } else if (m.type === 'UPDATE_ICON') {
     updateIconForActiveTab();
@@ -356,18 +397,27 @@ chrome.runtime.onMessage.addListener((m, s, sendResponse) => {
     performCloudUpload()
       .then(t => sendResponse({success:true, time:t}))
       .catch(e => {
-        PSL.error('background', 'Manual sync upload failed', e.message);
-        sendResponse({success:false, error:e.message});
+        const code = e && e.code || 'cloud_failed';
+        PSL.error('background', 'Manual sync upload failed', code);
+        sendResponse({success:false, error:code});
       });
     return true; 
+  } else if (m.type === 'MANUAL_SYNC_PREVIEW') {
+    performCloudPreview()
+      .then(result => sendResponse({success:true, ...result}))
+      .catch(error => sendResponse({success:false, error: error && error.code || 'cloud_failed'}));
+    return true;
+  } else if (m.type === 'MANUAL_SYNC_UNDO') {
+    performCloudUndo()
+      .then(result => sendResponse({success:true, canUndo:false, ...result}))
+      .catch(error => sendResponse({success:false, error: error && error.code || 'cloud_failed'}));
+    return true;
   } else if (m.type === 'MANUAL_SYNC_DOWNLOAD') {
-    performCloudDownload()
-      .then(t => sendResponse({success:true, time:t}))
+    performCloudDownload(m.previewId)
+      .then(result => sendResponse({success:true, canUndo:true, ...result}))
       .catch(e => {
         // SyntaxError messages from response.json() may echo remote config content.
-        const safeMessage = e && e.name === 'SyntaxError'
-          ? 'Remote configuration is not valid JSON'
-          : (e && e.message) || 'Unknown';
+        const safeMessage = e && e.code || 'cloud_failed';
         PSL.error('background', 'Manual sync download failed', safeMessage);
         sendResponse({success:false, error:safeMessage});
       });
@@ -408,488 +458,242 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // ===== 核心逻辑 =====
 function normalizeSet(list) {
-  if (!list) return new Set();
-  return new Set(list.map(d => {
-    if (!d) return null;
-    let raw = d.toLowerCase().trim();
-    let prefix = "";
-    if (raw.startsWith('*.')) { prefix = "*."; raw = raw.substring(2); } 
-    else if (raw.startsWith('.')) { prefix = "."; raw = raw.substring(1); }
-    // 🔥 修复: IDN 域名转换前先剥离前缀，转换后再拼回
-    if (/[^\x00-\x7F]/.test(raw)) {
-      try { 
-        raw = new URL('http://' + raw).hostname; 
-      } catch (e) { 
-        PSL.warn('background', 'normalizeSet: IDN parse failed, keeping original', {
-          inputLength: raw.length,
-          nonAscii: true,
-        });
-        // keep original raw value rather than silently dropping
-      }
-    }
-    return prefix + raw;
-  }).filter(Boolean));
+  return new Set(ProxySwitchRouting.normalizeRules(Array.isArray(list) ? list : []));
 }
 
 /**
- * Refresh the cache and PAC without changing the user's selected proxy mode.
- * Rule edits may request application of the new script if PAC is still active.
+ * Refreshing rules never grants permission to take over another controller's proxy.
+ * Keep the legacy ownedOnly argument for diagnostics callers; all maintenance now owns-only.
  */
 function refreshCacheAndIcon(done, applyIfPac = false, ownedOnly = false) {
-  if (isApplyingProxy) {
-    let retries = 0;
-    const tryAgain = () => {
-      if (!isApplyingProxy) {
-        refreshCacheAndIcon(done, applyIfPac, ownedOnly);
-        return;
-      }
-      retries++;
-      if (retries > 20) {
-        PSL.warn('background', 'refreshCacheAndIcon timeout, forcing unlock');
-        isApplyingProxy = false;
-        refreshCacheAndIcon(done, applyIfPac, ownedOnly);
-        return;
-      }
-      setTimeout(tryAgain, 50);
-    };
-    setTimeout(tryAgain, 50);
-    return;
-  }
-  isApplyingProxy = true;
-  let completed = false;
-  const finish = (error) => {
-    if (completed) return;
-    completed = true;
-    isApplyingProxy = false;
-    if (error) PSL.error('background', 'Proxy refresh failed', error.message || String(error));
-    if (done) done(error);
-  };
-  const guarded = (callback) => (...args) => {
-    if (completed) return;
-    try {
-      callback(...args);
-    } catch (error) {
-      finish(error);
-    }
-  };
-  const readCache = guarded(() => chrome.storage.local.get(PAC_RELATED_KEYS, guarded((items) => {
-    if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
-    cachedUserRules = normalizeSet(items.userRules);
-    cachedUserWhitelist = normalizeSet(items.userWhitelist);
-    cachedGfwDomains = normalizeSet(items.gfwDomains);
-    cachedTempRules = normalizeSet(items.tempRules);
-    cachedDiagnosticTrial = items.diagnosticTrial || null;
-    if (!lastPacHash && items.pacHash) lastPacHash = items.pacHash;
-
-    const pacScriptStr = buildPacScriptString(resolveActiveServer(items));
-    persistPacScriptIfNeeded(items, pacScriptStr, guarded((error) => {
-      if (error) throw error;
-      chrome.proxy.settings.get({}, guarded((d) => {
-        if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
-        const mode = (d && d.value) ? d.value.mode : 'direct';
-        currentProxyMode = mode;
-        const updateIcon = () => {
-          handleGlobalIconUpdate(mode);
-          finish();
-        };
-        if (applyIfPac && mode === 'pac_script' && (!ownedOnly || d.levelOfControl === 'controlled_by_this_extension')) {
-          if (!pacScriptStr) throw new Error('no_server');
-          chrome.proxy.settings.set({
-            value: { mode: 'pac_script', pacScript: { data: pacScriptStr } },
-            scope: 'regular',
-          }, guarded(() => {
-            if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
-            updateIcon();
-          }));
-        } else {
-          updateIcon();
-        }
-      }));
-    }));
-  })));
-  readCache();
+  enqueueProxyOperation({ kind: 'refresh', applyIfPac, done });
 }
 
 function updateCacheAndApply(specificTabId, specificUrl, _retries, traceBoot) {
-  if (isApplyingProxy) {
-    const retries = (_retries || 0) + 1;
-    if (retries > 20) {
-      PSL.warn('background', 'updateCacheAndApply timeout, forcing unlock');
-      isApplyingProxy = false;
-    } else {
-      setTimeout(() => updateCacheAndApply(specificTabId, specificUrl, retries, traceBoot), 100);
-      return;
-    }
+  const queued = proxyOperationQueue.find(operation => operation.kind === 'maintenance');
+  if (queued) {
+    queued.specificTabId = specificTabId;
+    queued.specificUrl = specificUrl;
+    queued.traceBoot = queued.traceBoot || traceBoot;
+    return;
   }
-  
-  chrome.storage.local.get(PAC_RELATED_KEYS, (items) => {
-    if (traceBoot) ProxySwitchBootJournal.mark('initial_storage_get_returned');
-    // 1. 更新内存缓存
-    cachedUserRules = normalizeSet(items.userRules);
-    cachedUserWhitelist = normalizeSet(items.userWhitelist);
-    cachedGfwDomains = normalizeSet(items.gfwDomains);
-    cachedTempRules = normalizeSet(items.tempRules);
-    cachedDiagnosticTrial = items.diagnosticTrial || null;
-    if (traceBoot) {
-      ProxySwitchBootJournal.mark('initial_cache_built', {
-        userRules: cachedUserRules.size,
-        whitelist: cachedUserWhitelist.size,
-        gfw: cachedGfwDomains.size,
-        tempRules: cachedTempRules.size,
-      });
-    }
-    
-    // 🔥 修复: 初始化哈希值（首次运行时）
-    if (!lastPacHash && items.pacHash) {
-      lastPacHash = items.pacHash;
-    }
-    
-    // 2. 应用设置 (生成 PAC 并注入)
-    applyProxySettings(items, () => {
-      // 3. 设置应用完毕后的回调
-      // 4. 更新图标
-      if (traceBoot) ProxySwitchBootJournal.mark('initial_active_icon_entered');
-      if (specificTabId && specificUrl) {
-        // 针对性更新（来自 Popup 的操作）
-        updateTabIcon(specificTabId, specificUrl);
-      } else {
-        // 常规更新
-        updateIconForActiveTab();
-      }
-      if (traceBoot) ProxySwitchBootJournal.mark('initial_active_icon_returned');
-
-      if (initReadyResolver) {
-        initReadyResolver();
-        initReadyResolver = null;
-      }
-    }, traceBoot);
-  });
+  enqueueProxyOperation({ kind: 'maintenance', specificTabId, specificUrl, traceBoot });
 }
 
-function applyProxySettings(items, callback, traceBoot) {
-  const activeServer = resolveActiveServer(items);
-  if (traceBoot) ProxySwitchBootJournal.mark('initial_pac_build_entered');
-  const pacScriptStr = buildPacScriptString(activeServer);
-  if (traceBoot) ProxySwitchBootJournal.mark('initial_pac_build_returned', { pacLength: pacScriptStr.length });
+function enqueueProxyOperation(operation) {
+  proxyOperationQueue.push(operation);
+  runNextProxyOperation();
+}
 
-  persistPacScriptIfNeeded(items, pacScriptStr, () => {
-    if (traceBoot) ProxySwitchBootJournal.mark('initial_pac_persist_returned');
-    doApplyProxyConfig(callback);
-  });
-
-  function doApplyProxyConfig(cb) {
-    if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_get_dispatched');
-    chrome.proxy.settings.get({}, (d) => {
-      const mode = (d && d.value) ? d.value.mode : 'direct';
-      currentProxyMode = mode;
-      if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_get_returned', { mode });
-      if (traceBoot) ProxySwitchBootJournal.mark('initial_global_icon_entered', { mode });
-      handleGlobalIconUpdate(mode);
-      if (traceBoot) ProxySwitchBootJournal.mark('initial_global_icon_returned', { mode });
-
-      if (mode === 'pac_script' && pacScriptStr) {
-        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_dispatched', { mode });
-        chrome.proxy.settings.set({
-          value: { mode: "pac_script", pacScript: { data: pacScriptStr } },
-          scope: 'regular'
-        }, () => {
-          if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_returned', {
-            mode,
-            success: !chrome.runtime.lastError,
-          });
-          if (chrome.runtime.lastError) {
-            PSL.error('background', 'PAC proxy apply failed', chrome.runtime.lastError.message);
-          } else {
-            PSL.info('background', 'PAC proxy settings applied');
-          }
-          if (cb) cb();
-        });
-      } else if (mode === 'pac_script' && !pacScriptStr) {
-        PSL.warn('background', 'PAC mode but no active server, falling back to direct');
-        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_dispatched', { mode: 'direct-fallback' });
-        chrome.proxy.settings.set({
-          value: { mode: "direct" },
-          scope: 'regular'
-        }, () => {
-          if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_returned', {
-            mode: 'direct-fallback',
-            success: !chrome.runtime.lastError,
-          });
-          currentProxyMode = 'direct';
-          handleGlobalIconUpdate('direct');
-          if (cb) cb();
-        });
-      } else if (mode === 'fixed_servers' && activeServer) {
-        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_dispatched', { mode });
-        chrome.proxy.settings.set({
-          value: {
-            mode: "fixed_servers",
-            rules: {
-              singleProxy: {
-                scheme: (activeServer.scheme || 'SOCKS5').toLowerCase(),
-                host: (activeServer.host || '127.0.0.1').trim(),
-                port: parseInt(activeServer.port, 10) || 1080
-              }
+function runNextProxyOperation() {
+  if (proxyOperationActive || !proxyOperationQueue.length) return;
+  const operation = proxyOperationQueue.shift();
+  proxyOperationActive = operation;
+  isApplyingProxy = true;
+  let completed = false;
+  let notified = false;
+  let pendingWrite = false;
+  let timedOut = false;
+  let pacScriptStr = '';
+  const active = () => !completed && proxyOperationActive === operation;
+  const mark = (phase, detail) => {
+    if (operation.traceBoot) ProxySwitchBootJournal.mark(phase, detail);
+  };
+  const notify = (error) => {
+    if (notified) return;
+    notified = true;
+    if (operation.traceBoot && initReadyResolver) {
+      initReadyResolver({ error: error ? error.message || String(error) : null });
+      initReadyResolver = null;
+    }
+    try {
+      if (operation.done) operation.done(error, pacScriptStr, { mode: currentProxyMode, levelOfControl: currentProxyControl });
+    } catch (callbackError) {
+      PSL.error('background', 'Proxy operation callback failed', callbackError.message || String(callbackError));
+    }
+  };
+  const finish = (error) => {
+    if (!active()) return;
+    completed = true;
+    clearTimeout(timeout);
+    proxyOperationActive = null;
+    isApplyingProxy = false;
+    if (error) PSL.error('background', 'Proxy operation failed', { kind: operation.kind, error: error.message || String(error) });
+    try { notify(error); } finally {
+      runNextProxyOperation();
+    }
+  };
+  const guarded = (callback) => (...args) => {
+    if (!active()) return;
+    try { callback(...args); } catch (error) { finish(error); }
+  };
+  const checkLastError = () => {
+    if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
+  };
+  // Reads can be abandoned. A dispatched write cannot be cancelled: keep its lease until
+  // Chrome acknowledges the commit, even after the caller has been told it timed out.
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    const error = new Error('proxy_operation_timeout');
+    if (pendingWrite) {
+      operation.writePending = true;
+      PSL.warn('background', 'Proxy write is still pending; retaining operation lease', { kind: operation.kind });
+      notify(error);
+    } else finish(error);
+  }, PROXY_OPERATION_TIMEOUT_MS);
+  const readCache = guarded(() => {
+    const configurationVersion = proxyConfigurationVersion;
+    const readReturned = guarded((stored, checkStorageError = true) => {
+      if (checkStorageError) checkLastError();
+      const items = stored && typeof stored === 'object' ? stored : {};
+      mark('initial_storage_get_returned');
+      cachedUserRules = normalizeSet(items.userRules);
+      cachedUserWhitelist = normalizeSet(items.userWhitelist);
+      cachedGfwDomains = normalizeSet(items.gfwDomains);
+      cachedTempRules = normalizeSet(items.tempRules);
+      cachedDiagnosticTrial = ProxySwitchRouting.safeTrial(items.diagnosticTrial);
+      mark('initial_cache_built', { userRules: cachedUserRules.size, whitelist: cachedUserWhitelist.size, gfw: cachedGfwDomains.size, tempRules: cachedTempRules.size });
+      if (!lastPacHash && typeof items.pacHash === 'string') lastPacHash = items.pacHash;
+      const activeServer = resolveActiveServer(items);
+      mark('initial_pac_build_entered');
+      pacScriptStr = buildPacScriptString(activeServer);
+      mark('initial_pac_build_returned', { pacLength: pacScriptStr.length });
+      if (operation.kind === 'ensure' && !pacScriptStr) throw new Error('no_server');
+      persistPacScriptIfNeeded(items, pacScriptStr, guarded((error) => {
+        if (timedOut) {
+          finish(error || new Error('proxy_operation_timeout'));
+          updateCacheAndApply();
+          return;
+        }
+        if (error) throw error;
+        mark('initial_pac_persist_returned');
+        if (configurationVersion !== proxyConfigurationVersion) { readCache(); return; }
+        if (operation.kind === 'ensure') { finish(); return; }
+        mark('initial_proxy_get_dispatched');
+        chrome.proxy.settings.get({}, guarded((details) => {
+          checkLastError();
+          if (configurationVersion !== proxyConfigurationVersion) { readCache(); return; }
+          observeProxyState(details);
+          const mode = currentProxyMode;
+          mark('initial_proxy_get_returned', { mode, control: currentProxyControl });
+          let value = null;
+          const release = operation.kind === 'release';
+          if (operation.kind === 'user-mode') {
+            if (!['controlled_by_this_extension', 'controllable_by_this_extension'].includes(currentProxyControl)) throw new Error('proxy_uncontrolled');
+            const target = operation.mode;
+            if (target === 'pac_script') {
+              if (!pacScriptStr) throw new Error('no_server');
+              value = { mode: target, pacScript: { data: pacScriptStr } };
+            } else if (target === 'fixed_servers') {
+              if (!activeServer) throw new Error('no_server');
+              value = { mode: target, rules: { singleProxy: { scheme: activeServer.scheme.toLowerCase(), host: activeServer.host, port: activeServer.port } } };
+            } else value = { mode: target };
+          } else if (currentProxyControl === 'controlled_by_this_extension') {
+            if (mode === 'pac_script' && (operation.kind === 'maintenance' || operation.applyIfPac)) {
+              if (!pacScriptStr) throw new Error('no_server');
+              if (!details.value.pacScript || details.value.pacScript.data !== pacScriptStr) value = { mode, pacScript: { data: pacScriptStr } };
+            } else if (mode === 'fixed_servers' && operation.kind === 'maintenance') {
+              if (!activeServer) throw new Error('no_server');
+              value = { mode, rules: { singleProxy: { scheme: activeServer.scheme.toLowerCase(), host: activeServer.host, port: activeServer.port } } };
+              if (JSON.stringify(details.value.rules) === JSON.stringify(value.rules)) value = null;
             }
-          },
-          scope: 'regular'
-        }, () => {
-          if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_returned', {
-            mode,
-            success: !chrome.runtime.lastError,
-          });
-          if (chrome.runtime.lastError) {
-            PSL.error('background', 'Fixed proxy apply failed', chrome.runtime.lastError.message);
-          } else {
-            PSL.info('background', 'Fixed proxy settings applied');
           }
-          if (cb) cb();
-        });
-      } else {
-        if (traceBoot) ProxySwitchBootJournal.mark('initial_proxy_set_skipped', { mode });
-        if (cb) cb();
-      }
+          const completeCurrent = () => {
+            if (configurationVersion !== proxyConfigurationVersion) { readCache(); return; }
+            mark('initial_active_icon_entered');
+            if (Number.isInteger(operation.specificTabId) && operation.specificUrl) updateTabIcon(operation.specificTabId, operation.specificUrl);
+            else updateIconForActiveTab();
+            mark('initial_active_icon_returned');
+            finish();
+          };
+          if (!value && !release) {
+            mark('initial_proxy_set_skipped', { mode, control: currentProxyControl });
+            completeCurrent();
+            return;
+          }
+          mark('initial_proxy_set_dispatched', { mode });
+          pendingWrite = true;
+          try {
+            const mutation = release ? 'clear' : 'set';
+            const settings = release ? { scope: 'regular' } : { value, scope: 'regular' };
+            chrome.proxy.settings[mutation](settings, guarded(() => {
+              pendingWrite = false;
+              checkLastError();
+              mark('initial_proxy_set_returned', { mode, success: true });
+              if (timedOut) {
+                // The write really committed. Release only now and let the next operation
+                // reread the latest configuration; never run this expired operation further.
+                finish(new Error('proxy_operation_timeout'));
+                updateCacheAndApply();
+                return;
+              }
+              // Report the actual resulting state, not just the mode we requested.
+              chrome.proxy.settings.get({}, guarded((actual) => {
+                checkLastError();
+                observeProxyState(actual, true);
+                if (release && currentProxyControl === 'controlled_by_this_extension') throw new Error('proxy_failed');
+                if (operation.kind === 'user-mode') {
+                  if (currentProxyControl !== 'controlled_by_this_extension') throw new Error('proxy_uncontrolled');
+                  if (currentProxyMode !== operation.mode) throw new Error('proxy_failed');
+                }
+                PSL.info('background', 'Proxy settings applied', { mode: currentProxyMode });
+                completeCurrent();
+              }));
+            }));
+          } catch (error) { pendingWrite = false; throw error; }
+        }));
+      }), active, (pending) => { pendingWrite = pending; });
     });
+    // Direct/system are recovery actions and must remain usable when configuration storage fails.
+    if (operation.kind === 'release' || operation.kind === 'user-mode' && ['direct', 'system'].includes(operation.mode)) readReturned({}, false);
+    else chrome.storage.local.get(PAC_RELATED_KEYS, readReturned);
+  });
+  readCache();
+}
+
+function observeProxyState(details, clearError = false) {
+  const mode = details && details.value && typeof details.value.mode === 'string' ? details.value.mode : 'unknown';
+  if (clearError || mode !== currentProxyMode) currentProxyError = null;
+  currentProxyMode = mode;
+  currentProxyControl = details && typeof details.levelOfControl === 'string' ? details.levelOfControl : 'unknown';
+  handleGlobalIconUpdate(mode);
+  const status = { mode, levelOfControl: currentProxyControl, updatedAt: Date.now(), error: currentProxyError };
+  try {
+    Promise.resolve(chrome.storage.local.set({ proxyRuntimeStatus: status })).catch(error => {
+      PSL.warn('background', 'Proxy status persistence failed', error.message || String(error));
+    });
+  } catch (error) { PSL.warn('background', 'Proxy status persistence failed', error.message || String(error)); }
+  if (chrome.action && chrome.action.setBadgeText) {
+    const warning = !!currentProxyError || ['controlled_by_other_extensions', 'not_controllable'].includes(currentProxyControl);
+    chrome.action.setBadgeText({ text: warning ? '!' : '' });
+    if (warning && chrome.action.setBadgeBackgroundColor) chrome.action.setBadgeBackgroundColor({ color: '#B76B16' });
   }
 }
 
 // ===== 同步逻辑 =====
-// ===== 同步逻辑 (纯明文 JSON 版本) =====
-
-/**
- * 辅助：WebDAV 上传
- */
-async function bgWebdavUpload(config, jsonString){
-  // 注意：Basic Auth 这里的 btoa 是 HTTP 标准认证头，Google 允许使用
-  const auth = 'Basic ' + btoa(config.davUser + ':' + config.davPass);
-  const baseUrl = config.davUrl.endsWith('/') ? config.davUrl : config.davUrl + '/';
-  
-  // 1. 尝试创建目录 (忽略错误，因为目录可能已存在)
-  try { 
-    await fetch(baseUrl + DAV_DIR_NAME + '/', {
-      method: 'MKCOL', 
-      headers: { 'Authorization': auth }
-    }); 
-  } catch (e) {
-    PSL.warn('background', 'WebDAV MKCOL skipped', e.message);
-  }
-  
-  // 2. 上传文件 (直接 PUT JSON 字符串)
-  const res = await fetch(baseUrl + DAV_DIR_NAME + '/' + CONFIG_FILE_NAME, {
-    method: 'PUT',
-    headers: { 
-      'Authorization': auth, 
-      'Content-Type': 'application/json' 
-    },
-    body: jsonString // 发送明文
+// This service persists pending uploads and validates every cloud restore.
+let cloudSyncService = null;
+function getCloudSyncService() {
+  if (!cloudSyncService) cloudSyncService = ProxySwitchCloudSync.create({
+    chrome, configuration: ProxySwitchConfiguration, fetch: (...args) => fetch(...args),
+    mutateConfiguration: fn => runConfigurationMutation(fn),
+    uuid: generateUUID,
+    refresh: () => new Promise((resolve, reject) => refreshCacheAndIcon(error => error ? reject(error) : resolve(), true, true)),
+    report: error => PSL.warn('background', 'Cloud operation failed', error && error.code || 'cloud_failed'),
   });
-  
-  if(!res.ok) throw new Error("WebDAV Upload failed: " + res.status);
+  return cloudSyncService;
 }
-
-/**
- * 辅助：GitHub Gist 下载
- */
-async function bgGithubDownload(token){
-  const gists = await ghFetch('https://api.github.com/gists', 'GET', token);
-  // 查找包含配置文件的 Gist
-  const target = gists.find(x => x.files && x.files[CONFIG_FILE_NAME]);
-  if(!target) throw new Error("Gist 中未找到配置文件");
-  
-  // 获取 Raw 内容
-  const rawUrl = target.files[CONFIG_FILE_NAME].raw_url;
-  const r = await fetch(rawUrl + '?t=' + Date.now()); // 加时间戳防缓存
-  if(!r.ok) throw new Error("Gist Raw Download failed");
-  
-  return await r.json(); // 直接解析 JSON
+function notifyCloudConfigurationChange(changes) {
+  return getCloudSyncService().changed(changes).catch(error =>
+    PSL.warn('background', 'Cloud pending state failed', error && error.code || 'storage_failed'));
 }
+function performCloudUpload() { return getCloudSyncService().upload(); }
+function performCloudPreview() { return getCloudSyncService().preview(); }
+function performCloudDownload(previewId) { return getCloudSyncService().apply(previewId); }
+function performCloudUndo() { return getCloudSyncService().undo(); }
 
-/**
- * 核心：执行上传
- */
-async function performCloudUpload(){
-  isSyncing = true;
-  try {
-    // 1. 获取本地数据
-    const items = await chrome.storage.local.get(null);
-    
-    // 2. 构造备份对象 (只备份核心配置；UI 偏好和同步元信息不纳入备份)
-    const backupData = {
-      userRules: items.userRules || [],
-      userWhitelist: items.userWhitelist || [],
-      tempRules: items.tempRules || [],
-      serverList: items.serverList || [],
-      activeServerId: items.activeServerId || '',
-      gfwlistUrl: items.gfwlistUrl || '',
-
-      updatedAt: new Date().toISOString(),
-      backupVer: 5
-    };
-    
-    // 3. 转换为格式化的 JSON 字符串 (方便用户阅读)
-    const jsonContent = JSON.stringify(backupData, null, 2);
-    
-    // 4. 根据提供商上传
-    if (items.syncProvider === 'webdav') {
-      if (!items.davUrl) throw new Error("WebDAV URL 未设置");
-      await bgWebdavUpload(items, jsonContent);
-    } else {
-      if (!items.gitToken) throw new Error("GitHub Token 未设置");
-      
-      // 检查是否存在旧 Gist，存在则更新，不存在则创建
-      let gistId = null;
-      try {
-        const gists = await ghFetch('https://api.github.com/gists', 'GET', items.gitToken);
-        const exist = gists.find(x => x.files && x.files[CONFIG_FILE_NAME]);
-        if (exist) gistId = exist.id;
-      } catch (e) {
-        PSL.warn('background', 'Gist lookup failed, will create new', e.message);
-      }
-      
-      const body = {
-        description: "ProxySwitch Configuration Backup", // 移除 Obfuscated 字样
-        public: false,
-        files: { 
-          [CONFIG_FILE_NAME]: { content: jsonContent } 
-        }
-      };
-      
-      if (gistId) {
-        await ghFetch(`https://api.github.com/gists/${gistId}`, 'PATCH', items.gitToken, body);
-      } else {
-        await ghFetch('https://api.github.com/gists', 'POST', items.gitToken, body);
-      }
-    }
-    
-    const timeDisplay = new Date().toLocaleString();
-    await chrome.storage.local.set({ lastSyncTime: timeDisplay });
-    return timeDisplay;
-    
-  } finally { 
-    isSyncing = false; 
-  }
-}
-
-/**
- * 核心：执行下载
- */
-async function performCloudDownload(){
-  isSyncing = true;
-  try {
-    const items = await chrome.storage.local.get(['syncProvider', 'gitToken', 'davUrl', 'davUser', 'davPass']);
-    let remoteData = null;
-    
-    // 1. 下载数据
-    if (items.syncProvider === 'webdav') {
-      if (!items.davUrl) throw new Error("WebDAV URL 未设置");
-      const auth = 'Basic ' + btoa(items.davUser + ':' + items.davPass);
-      const baseUrl = items.davUrl.endsWith('/') ? items.davUrl : items.davUrl + '/';
-      
-      const res = await fetch(baseUrl + DAV_DIR_NAME + '/' + CONFIG_FILE_NAME + '?t=' + Date.now(), { 
-        headers: { 'Authorization': auth } 
-      });
-      if (!res.ok) throw new Error("WebDAV Download failed");
-      remoteData = await res.json();
-      
-    } else {
-      if (!items.gitToken) throw new Error("GitHub Token 未设置");
-      remoteData = await bgGithubDownload(items.gitToken);
-    }
-    
-    // 2. 验证与应用 (不兼容旧版，直接读取字段)
-    if (remoteData && typeof remoteData === 'object') {
-      
-      // 清理敏感字段和不应同步的字段
-      delete remoteData.gitToken;
-      delete remoteData.davUrl;
-      delete remoteData.davUser;
-      delete remoteData.davPass;
-      delete remoteData.gfwDomains;
-      delete remoteData.pacScriptData;
-      delete remoteData.pacVersion;
-      delete remoteData.pacHash;
-      delete remoteData.lastSyncTime;
-      delete remoteData.ruleCount;
-      delete remoteData.lastUpdate;
-      delete remoteData.updatedAt;
-      delete remoteData.backupVer;
-      delete remoteData.diagnosticSession;
-      delete remoteData.diagnosticTrial;
-      delete remoteData.diagnosticUiState;
-
-      // Skip empty arrays and null values to avoid overwriting local data
-      const safeData = {};
-      for (const [key, value] of Object.entries(remoteData)) {
-        if (Array.isArray(value) && value.length === 0) continue;
-        if (value === undefined || value === null) continue;
-        safeData[key] = value;
-      }
-
-      await chrome.storage.local.set(safeData);
-      
-      const timeDisplay = new Date().toLocaleString();
-      await chrome.storage.local.set({ lastSyncTime: timeDisplay });
-      
-      // 3. 仅在下载数据含代理相关键时才刷新 PAC，避免无意义重生成
-      const hasProxyKeys = Object.keys(safeData).some(k => 
-        ['userRules','userWhitelist','gfwDomains','tempRules','serverList','activeServerId'].includes(k)
-      );
-      if (hasProxyKeys) {
-        if (uploadDebounceTimer) { clearTimeout(uploadDebounceTimer); uploadDebounceTimer = null; }
-        uploadDebounceTimer = setTimeout(() => {
-          uploadDebounceTimer = null;
-          updateCacheAndApply();
-        }, 200);
-      }
-      
-      return timeDisplay;
-    } else {
-      throw new Error("云端数据格式错误或不兼容");
-    }
-    
-  } finally { 
-    isSyncing = false; 
-  }
-}
-
-/**
- * 🔥 修复 Bug #4: 内存泄漏防护
- * 自动上传触发器（带防抖和清理）
- */
-function triggerAutoUpload() {
-  // 清理旧定时器
-  if (uploadDebounceTimer) {
-    clearTimeout(uploadDebounceTimer);
-    uploadDebounceTimer = null;
-  }
-  
-  uploadDebounceTimer = setTimeout(() => {
-    performCloudUpload()
-      .catch(err => {
-        PSL.error('background', 'Auto upload failed', err.message);
-      })
-      .finally(() => {
-        // 操作完成后清空引用
-        uploadDebounceTimer = null;
-      });
-  }, 10000);
-}
-
-async function ghFetch(url, method, token, body) {
-  const opts = { 
-    method, 
-    headers: { 
-      'Authorization': `token ${token}`, 
-      'Accept': 'application/vnd.github.v3+json', 
-      'Content-Type': 'application/json' 
-    } 
-  };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  if (!res.ok) throw new Error(`GitHub API Error: ${res.status}`);
-  return await res.json();
-}
-
+// Construct synchronously so alarms can wake a worker with an unfinished upload.
+if (typeof ProxySwitchCloudSync !== 'undefined') getCloudSyncService();
 // ===== 图标管理模块 =====
 function getStaticIconImageData(key, size) {
   const iconData = self.ProxySwitchIconData;
@@ -973,7 +777,7 @@ function handleGlobalIconUpdate(mode) {
 
   // 3. 仅在非 PAC 模式下强制覆盖标签专用图标
   //    PAC 模式下的标签图标由 updateTabIcon 按域名匹配单独管理，此处不应覆盖。
-  if (mode !== 'pac_script') {
+  if (mode !== 'pac_script' || currentProxyControl !== 'controlled_by_this_extension') {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
       if (tabs && tabs[0]) {
         setActionIcon(iconKey, tabs[0].id);
@@ -1003,7 +807,7 @@ function getSafeHostname(urlStr) {
  * 更新标签页图标（带防抖和验证）
  */
 function updateTabIcon(tabId, url) {
-  if (currentProxyMode !== 'pac_script') return;
+  if (currentProxyMode !== 'pac_script' || currentProxyControl !== 'controlled_by_this_extension') return;
   const i18n = chrome.i18n.getMessage;
 
   // 清理该标签页的旧定时器
@@ -1046,7 +850,7 @@ function updateTabIcon(tabId, url) {
       }
       
       // 🔥 关键修复: 验证 URL 是否仍然匹配
-      if (tab && tab.url === url) {
+      if (tab && tab.url === url && currentProxyMode === 'pac_script' && currentProxyControl === 'controlled_by_this_extension') {
         setActionIcon(iconKey, tabId);
         chrome.action.setTitle({ title: `ProxySwitch: ${title}`, tabId: tabId });
       }
@@ -1097,7 +901,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
  * 重新检查是否仍是活动标签
  */
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  if (currentProxyMode === 'pac_script') {
+  if (currentProxyMode === 'pac_script' && currentProxyControl === 'controlled_by_this_extension') {
     await initPromise;
     
     // 🔥 关键修复: 重新查询确认仍是活动标签
@@ -1114,6 +918,10 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         }
       }
     });
+  } else {
+    // A tab may retain a PAC-specific icon from before a global mode/control change.
+    // Calibrate it when it becomes visible instead of leaving the old rule-route colour.
+    handleGlobalIconUpdate(currentProxyMode);
   }
 });
 
@@ -1125,10 +933,30 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
+if (chrome.proxy.settings.onChange) chrome.proxy.settings.onChange.addListener((details) => {
+  PSL.info('background', 'Proxy settings changed', {
+    mode: details && details.value && details.value.mode,
+    levelOfControl: details && details.levelOfControl,
+  });
+  observeProxyState(details);
+  updateIconForActiveTab();
+});
+
+if (chrome.proxy.onProxyError) chrome.proxy.onProxyError.addListener((details) => {
+  const rawError = details && details.error;
+  const error = typeof rawError === 'string' && /^net::[A-Z_]+$/.test(rawError) ? rawError : 'proxy_error';
+  currentProxyError = { message: error, fatal: !!(details && details.fatal), at: Date.now() };
+  PSL.error('background', 'Proxy runtime error', currentProxyError);
+  // Chrome's error details can contain URLs. Persist only an error category, never request data.
+  observeProxyState({ value: { mode: currentProxyMode }, levelOfControl: currentProxyControl });
+});
+
+let diagnosticsController = null;
 if (typeof ProxySwitchDiagnostics !== 'undefined') {
-  ProxySwitchDiagnostics.create({
+  diagnosticsController = ProxySwitchDiagnostics.create({
     chrome,
     routing: ProxySwitchRouting,
+    mutateConfiguration: fn => runConfigurationMutation(fn),
     refresh: () => new Promise((resolve, reject) => {
       refreshCacheAndIcon((error) => error ? reject(error) : resolve(), true, true);
     }),
@@ -1140,8 +968,9 @@ ProxySwitchBootJournal.mark('listeners_registered');
 ProxySwitchBootJournal.mark('initialization_dispatching');
 updateCacheAndApply(undefined, undefined, undefined, true);
 ProxySwitchBootJournal.mark('initialization_dispatched');
-initPromise.then(async () => {
-  await ProxySwitchBootJournal.mark('ready', { proxyMode: currentProxyMode });
-  PSL.checkpoint('background', 'worker.ready', { proxyMode: currentProxyMode });
+initPromise.then(async (result) => {
+  const phase = result && result.error ? 'initialization_failed' : 'ready';
+  await ProxySwitchBootJournal.mark(phase, { proxyMode: currentProxyMode, error: result && result.error });
+  PSL.checkpoint('background', 'worker.' + phase, { proxyMode: currentProxyMode });
   await PSL.prune();
 });

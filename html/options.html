@@ -2,398 +2,99 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="../js/page-boot.js"></script>
   <title>__MSG_appName__</title>
-  <style>
-    :root {
-      /* --- 核心色调：科技蓝 --- */
-      --primary: #0ea5e9;        /* Sky-500 */
-      --primary-hover: #0284c7;  /* Sky-600 */
-      --primary-light: #e0f2fe;  /* Sky-100 */
-      
-      /* --- 背景与文字：冷灰系 --- */
-      --bg-body: #f1f5f9;        /* Slate-100 */
-      --bg-sidebar: #ffffff;     /* White */
-      --bg-card: #ffffff;
-      
-      --text-main: #0f172a;      /* Slate-900 */
-      --text-sub: #64748b;       /* Slate-500 */
-      --border: #e2e8f0;         /* Slate-200 */
-      
-      /* --- 功能色 --- */
-      --danger: #ef4444; 
-      --success: #10b981; 
-      --warning: #f59e0b;
-      
-      /* --- 细节参数 --- */
-      --radius: 12px;
-      --radius-sm: 6px;
-      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-      --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
-
-    /* --- 深色模式适配 --- */
-    html[data-theme="dark"] {
-      --primary: #38bdf8;
-      --primary-hover: #7dd3fc;
-      --primary-light: rgba(56, 189, 248, 0.15);
-      
-      --bg-body: #0f172a;
-      --bg-sidebar: #1e293b;
-      --bg-card: #1e293b;
-      
-      --text-main: #f1f5f9;
-      --text-sub: #94a3b8;
-      --border: #334155;
-      
-      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
-      --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
-    }
-
-    body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-body); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
-    
-    /* 侧边栏 */
-    .app-sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px 16px; gap: 8px; z-index: 10; }
-    .brand { padding: 0 12px 30px; font-size: 20px; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 12px; letter-spacing: -0.5px; }
-    .menu { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-    .menu-item { padding: 12px 16px; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: var(--text-sub); transition: 0.2s; }
-    .menu-item:hover { background: var(--bg-body); color: var(--text-main); }
-    .menu-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
-    .menu-footer { margin-top: auto; padding: 20px 0; font-size: 12px; color: var(--text-sub); text-align: center; opacity: 0.7; }
-    
-    /* 主内容区 */
-    .app-main { flex: 1; overflow-y: auto; padding: 40px; }
-    .container { max-width: 900px; margin: 0 auto; }
-    .section { display: none; animation: fadeIn 0.3s ease; }
-    .section.active { display: block; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: 0; } }
-    
-    h2 { margin: 0 0 24px 0; font-size: 24px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; justify-content: space-between; }
-    
-    /* 卡片样式 */
-    .card { background: var(--bg-card); border-radius: var(--radius); box-shadow: var(--shadow-card); border: 1px solid var(--border); padding: 24px; margin-bottom: 24px; transition: 0.2s; }
-    html[data-theme="dark"] .card { border: 1px solid rgba(255,255,255,0.05); }
-
-    /* 表单元素 */
-    .form-group { margin-bottom: 20px; }
-    label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; }
-    input[type="text"], input[type="password"], input[type="number"], select { width: 100%; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-body); color: var(--text-main); font-size: 14px; box-sizing: border-box; transition: 0.2s; }
-    input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
-    
-    /* 按钮 */
-    .btn { padding: 10px 20px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
-    .btn-sm { padding: 6px 12px; font-size: 12px; }
-    
-    .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(14, 165, 233, 0.3); }
-    .btn-primary:hover { background: var(--primary-hover); box-shadow: 0 4px 8px rgba(14, 165, 233, 0.4); transform: translateY(-1px); }
-    
-    .btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
-    .btn-danger:hover { background: var(--danger); color: #fff; }
-    
-    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-main); text-decoration: none; }
-    .btn-ghost:hover { border-color: var(--text-sub); background: var(--bg-body); }
-    
-    .btn-success { background: var(--success); color: #fff; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3); }
-    
-    /* 服务器列表 */
-    #serverListContainer { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-    .server-item { background: var(--bg-body); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; cursor: pointer; transition: all 0.2s; position: relative; }
-    .server-item:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: var(--shadow-sm); }
-    .server-item.active { border-color: var(--primary); background: var(--primary-light); }
-    .server-item.active .server-name { color: var(--primary); }
-    
-    /* 规则列表 */
-    .rule-toolbar { display: flex; gap: 10px; margin-bottom: 15px; background: var(--bg-body); padding: 10px; border-radius: var(--radius-sm); }
-    .rule-list { height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); }
-    .rule-item { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; font-family: monospace; font-size: 13px; align-items: center; }
-    .rule-item:hover { background: var(--bg-body); }
-    
-    /* 其他组件 */
-    .info-tip { background: var(--primary-light); color: var(--primary); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px; line-height: 1.5; margin-bottom: 20px; border: 1px solid rgba(14, 165, 233, 0.2); }
-    .help-text { font-size: 12px; color: var(--text-sub); margin-top: 6px; }
-    .server-tag { font-size: 10px; font-weight: 700; background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 4px; }
-    
-    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(50px); background: #0f172a; color: #fff; padding: 10px 24px; border-radius: 50px; font-size: 14px; font-weight: 500; opacity: 0; transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 10px 25px rgba(0,0,0,0.2); z-index: 100; }
-    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    
-    /* 滚动条美化 */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    .log-viewer { width: 100%; height: 300px; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5; background: var(--bg-body); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; box-sizing: border-box; resize: vertical; }
-    .log-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
-    .log-actions { display: flex; gap: 8px; }
-    .storage-readonly-warning { margin: 20px 28px 0; padding: 14px 18px; border: 1px solid rgba(239, 68, 68, 0.45); border-radius: var(--radius-sm); background: rgba(239, 68, 68, 0.1); color: var(--danger); font-size: 14px; font-weight: 600; line-height: 1.6; }
-    .storage-readonly-warning[hidden] { display: none; }
-    body.storage-readonly .menu-item:not([data-target="about"]) { opacity: 0.5; cursor: not-allowed; }
-    body.storage-readonly .section:not(#section-about) { pointer-events: none; opacity: 0.65; }
-    body.storage-readonly :disabled { cursor: not-allowed; }
-  </style>
+  <link rel="stylesheet" href="../assets/theme.css">
+  <link rel="stylesheet" href="../assets/options.css">
 </head>
 <body>
-
   <aside class="app-sidebar">
-    <div class="brand"><img src="../assets/icon.png" style="width:32px; height:32px;">  __MSG_appName__</div>
-    <ul class="menu">
-      <li class="menu-item active" data-target="server"><span>📡</span> __MSG_menuServer__</li>
-      <li class="menu-item" data-target="rules"><span>📝</span> __MSG_menuRules__</li>
-      <li class="menu-item" data-target="gfw"><span>🌏</span> __MSG_menuGfw__</li>
-      <li class="menu-item" data-target="sync"><span>☁️</span> __MSG_menuSync__</li>
-      <li class="menu-item" data-target="about"><span>⚙️</span> __MSG_menuGeneral__</li>
-    </ul>
-    <div class="menu-footer" id="appVersion">Version ...</div>
+    <div class="brand"><img src="../assets/icon.png" width="28" height="28" alt=""> <span>__MSG_appName__</span></div>
+    <nav class="menu" aria-label="__MSG_titleGeneral__">
+      <button type="button" class="menu-item active" data-target="server" aria-current="page"><span data-icon="route" aria-hidden="true"></span><span>__MSG_menuServer__</span></button>
+      <button type="button" class="menu-item" data-target="rules"><span data-icon="list" aria-hidden="true"></span><span>__MSG_menuRules__</span></button>
+      <button type="button" class="menu-item" data-target="gfw"><span data-icon="globe" aria-hidden="true"></span><span>__MSG_menuGfw__</span></button>
+      <button type="button" class="menu-item" data-target="sync"><span data-icon="cloud" aria-hidden="true"></span><span>__MSG_menuSync__</span></button>
+      <button type="button" class="menu-item" data-target="about"><span data-icon="settings" aria-hidden="true"></span><span>__MSG_menuGeneral__</span></button>
+    </nav>
+    <div class="menu-footer" id="appVersion">v…</div>
   </aside>
-
   <main class="app-main">
-    <div id="storageReadonlyWarning" class="storage-readonly-warning" role="alert" hidden></div>
     <div class="container">
-      
-      <!-- 服务器配置 -->
+      <div id="storageReadonlyWarning" class="storage-readonly-warning" role="alert" hidden></div>
       <div id="section-server" class="section active">
-        <h2>
-          __MSG_titleServer__
-          <div style="display:flex; gap:10px;">
-            <button id="testLatencyBtn" class="btn btn-ghost btn-sm">📶 __MSG_btnTestLatency__</button>
-            <button id="addServerBtn" class="btn btn-primary btn-sm">➕ __MSG_btnAddServer__</button>
-          </div>
-        </h2>
-        <div id="latencyResult" style="margin-bottom:15px; padding:10px; border-radius:8px; background:var(--bg-body); display:none; text-align:center;"></div>
-        
+        <header class="section-heading"><h2>__MSG_titleServer__</h2><div class="actions"><button id="testLatencyBtn" class="btn btn-ghost btn-sm"><span data-icon="clock" aria-hidden="true"></span>__MSG_btnTestLatency__</button><button id="addServerBtn" class="btn btn-primary btn-sm"><span data-icon="plus" aria-hidden="true"></span>__MSG_btnAddServer__</button></div></header>
+        <p class="help-text section-intro">__MSG_txtCurrentRouteLatency__</p>
+        <div id="latencyResult" class="operation-status" role="status" style="display:none"></div>
+        <p id="serverOperationStatus" class="operation-status" role="status" aria-live="polite" hidden></p>
         <div id="serverListContainer"></div>
-
-        <div id="serverForm" class="card" style="display:none; margin-top:20px; border:2px dashed var(--primary);">
-          <h3 style="margin-top:0;">__MSG_editServerTitle__</h3>
-          <div style="display:grid; grid-template-columns: 2fr 1fr; gap:15px; margin-bottom:15px;">
-            <div><label>__MSG_lblRemark__</label><input type="text" id="editName" placeholder="__MSG_phName__"></div>
-            <div><label>__MSG_lblProtocol__</label><select id="editScheme"><option value="HTTP">HTTP</option><option value="HTTPS">HTTPS</option><option value="SOCKS4">SOCKS4</option><option value="SOCKS5">SOCKS5</option></select></div>
+        <div id="serverForm" class="card server-form" style="display:none">
+          <h3>__MSG_editServerTitle__</h3>
+          <div class="form-grid">
+            <div class="form-group"><label for="editName">__MSG_lblRemark__</label><input type="text" id="editName" placeholder="__MSG_phName__" autocomplete="off"></div>
+            <div class="form-group"><label for="editScheme">__MSG_lblProtocol__</label><select id="editScheme"><option value="HTTP">HTTP</option><option value="HTTPS">HTTPS</option><option value="SOCKS4">SOCKS4</option><option value="SOCKS5">SOCKS5</option></select></div>
+            <div class="form-group"><label for="editHost">__MSG_lblHost__</label><input type="text" id="editHost" placeholder="__MSG_phHost__" spellcheck="false"></div>
+            <div class="form-group"><label for="editPort">__MSG_lblPort__</label><input type="number" id="editPort" min="1" max="65535" step="1" placeholder="__MSG_phPort__"></div>
           </div>
-          <div style="display:grid; grid-template-columns: 3fr 1fr; gap:15px; margin-bottom:20px;">
-            <div><label>__MSG_lblHost__</label><input type="text" id="editHost" placeholder="__MSG_phHost__"></div>
-            <div><label>__MSG_lblPort__</label><input type="number" id="editPort" placeholder="__MSG_phPort__"></div>
-          </div>
-          <div style="text-align:right;">
-            <button id="cancelServerItemBtn" class="btn btn-ghost">__MSG_btnCancel__</button>
-            <button id="saveServerItemBtn" class="btn btn-primary">__MSG_btnSave__</button>
-          </div>
+          <div class="actions align-end"><button id="cancelServerItemBtn" class="btn btn-ghost">__MSG_btnCancel__</button><button id="saveServerItemBtn" class="btn btn-primary">__MSG_btnSave__</button></div>
         </div>
       </div>
-
-      <!-- 规则管理 -->
       <div id="section-rules" class="section">
-        <h2>__MSG_menuRules__</h2>
+        <header class="section-heading"><h2>__MSG_menuRules__</h2></header>
         <div class="card">
-          <div style="display:flex; margin-bottom:15px;">
-             <select id="ruleTypeSelect" style="flex:1; padding:12px; font-weight:bold; border-radius:var(--radius-sm); border-color:var(--border);">
-              <option value="userRules">__MSG_selUserRules__</option>
-              <option value="userWhitelist">__MSG_selUserWhitelist__</option>
-              <option value="tempRules">__MSG_selTempRules__</option>
-            </select>
-          </div>
-          
+          <label for="ruleTypeSelect" class="sr-only">__MSG_menuRules__</label>
+          <select id="ruleTypeSelect" class="rule-type"><option value="userRules">__MSG_selUserRules__</option><option value="userWhitelist">__MSG_selUserWhitelist__</option><option value="tempRules">__MSG_selTempRules__</option></select>
           <div class="rule-toolbar">
-            <input type="text" id="ruleSearch" placeholder="__MSG_phSearchRule__" style="flex:1; background:var(--bg-card);">
-            <input type="text" id="ruleAddInput" placeholder="__MSG_phAddRule__" style="flex:1; background:var(--bg-card);">
-            <button id="ruleAddBtn" class="btn btn-primary btn-sm">__MSG_btnAdd__</button>
+            <label class="sr-only" for="ruleSearch">__MSG_phSearchRule__</label><input type="text" id="ruleSearch" placeholder="__MSG_phSearchRule__">
+            <label class="sr-only" for="ruleAddInput">__MSG_phAddRule__</label><input type="text" id="ruleAddInput" placeholder="__MSG_phAddRule__" spellcheck="false"><button id="ruleAddBtn" class="btn btn-primary btn-sm"><span data-icon="plus" aria-hidden="true"></span>__MSG_btnAdd__</button>
           </div>
-          
-          <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:12px; color:var(--text-sub);">
-            <span>__MSG_txtRuleCount__ <b id="currentRuleCount">0</b> __MSG_txtRuleUnit__</span>
-            <span>__MSG_txtRuleHint__</span>
-          </div>
-
+          <div class="rule-summary"><span>__MSG_txtRuleCount__ <b id="currentRuleCount">0</b> __MSG_txtRuleUnit__</span><span>__MSG_txtRuleHint__</span></div>
+          <div class="rule-feedback"><p id="ruleOperationStatus" class="operation-status" role="status" aria-live="polite" hidden></p><button id="ruleUndoBtn" class="btn btn-ghost btn-sm" hidden><span data-icon="undo" aria-hidden="true"></span>__MSG_btnUndo__</button></div>
           <div class="rule-list" id="ruleListContainer"></div>
-
-          <div style="display:flex; justify-content:space-between; margin-top:15px;">
-            <div style="display:flex; gap:10px;">
-              <button id="ruleExportBtn" class="btn btn-ghost btn-sm">__MSG_btnExport__</button>
-              <button id="ruleImportBtn" class="btn btn-ghost btn-sm">__MSG_btnImport__</button>
-              <input type="file" id="ruleFile" style="display:none" accept=".json">
-            </div>
-            <button id="ruleClearBtn" class="btn btn-ghost btn-sm" style="color:var(--danger)">__MSG_btnClearList__</button>
-          </div>
+          <div class="rule-footer"><div class="actions"><button id="ruleExportBtn" class="btn btn-ghost btn-sm"><span data-icon="download" aria-hidden="true"></span>__MSG_btnExport__</button><button id="ruleImportBtn" class="btn btn-ghost btn-sm"><span data-icon="upload" aria-hidden="true"></span>__MSG_btnImport__</button><input type="file" id="ruleFile" hidden accept=".json"></div><button id="ruleClearBtn" class="btn btn-ghost btn-sm text-danger"><span data-icon="trash" aria-hidden="true"></span>__MSG_btnClearList__</button></div>
         </div>
       </div>
-
-      <!-- GFWList -->
       <div id="section-gfw" class="section">
-        <h2>__MSG_titleGfw__</h2>
+        <header class="section-heading"><h2>__MSG_titleGfw__</h2></header>
         <div class="card">
-          <div class="info-tip">
-            __MSG_txtGfwTip__
+          <p class="info-tip">__MSG_txtGfwTip__</p>
+          <div class="form-group"><label for="gfwUrlInput">__MSG_lblGfwUrl__</label><div class="input-action"><input type="text" id="gfwUrlInput" placeholder="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt" spellcheck="false"><button id="saveGfwUrlBtn" class="btn btn-ghost">__MSG_btnSaveSource__</button></div><p class="help-text">__MSG_txtGfwDraftHint__</p>
+            <div class="actions mirrors"><button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt">GitHub Raw</button><button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt">jsDelivr CDN</button><button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://raw.gitmirror.com/gfwlist/gfwlist/master/gfwlist.txt">GitMirror</button></div>
+            <p class="help-text">__MSG_txtGfwNoUrl__ <a href="https://github.com/gfwlist/gfwlist" target="_blank" rel="noopener noreferrer">gfwlist/gfwlist<span data-icon="external" aria-hidden="true"></span></a></p>
           </div>
-          
-          <div class="form-group">
-            <label>__MSG_lblGfwUrl__</label>
-            <input type="text" id="gfwUrlInput" placeholder="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt" style="display:block; width:100%;">
-
-            <!-- 快捷镜像源选择 -->
-            <div style="margin-top: 8px; display:flex; gap:8px; flex-wrap:wrap;">
-              <button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt">GitHub Raw</button>
-              <button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt">jsDelivr CDN</button>
-              <button type="button" class="btn btn-ghost btn-sm gfw-mirror-btn" data-url="https://raw.gitmirror.com/gfwlist/gfwlist/master/gfwlist.txt">GitMirror</button>
-            </div>
-
-            <!-- 推荐引导链接 -->
-            <p class="help-text" style="margin-top: 8px; line-height: 1.5;">
-              __MSG_txtGfwNoUrl__
-              <a href="https://github.com/gfwlist/gfwlist" target="_blank" style="color:var(--primary); text-decoration:underline;">🔗 https://github.com/gfwlist/gfwlist</a>
-            </p>
-          </div>
-
-          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:15px; border-radius:var(--radius-sm); margin-top: 15px;">
-            <div>
-              <div style="font-weight:600; font-size:14px;">__MSG_lblCurrentStatus__</div>
-              <div id="gfwStatus" style="font-size:13px; color:var(--text-sub); margin-top:4px;">__MSG_statusNotLoaded__</div>
-            </div>
-            <button id="updateGfwBtn" class="btn btn-success">__MSG_btnUpdateGfw__</button>
-          </div>
-
-          <!-- GFWList 预览 -->
-          <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
-            <div style="display:flex; justify-content: space-between; align-items: center; cursor: pointer;" id="toggleGfwPreviewBtn">
-              <span style="font-size: 13px; font-weight: 600; color: var(--text-sub);">__MSG_btnGfwPreview__</span>
-              <span id="gfwPreviewArrow" style="font-size: 12px; color: var(--text-sub); transition: transform 0.2s;">▼</span>
-            </div>
-            
-            <div id="gfwPreviewArea" style="display: none; margin-top: 12px; animation: fadeIn 0.2s;">
-              <textarea id="gfwContentBox" readonly 
-                style="width: 100%; height: 300px; font-family: monospace; font-size: 12px; line-height: 1.5; background: var(--bg-body); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); resize: vertical; padding: 10px; box-sizing: border-box;" 
-                placeholder="__MSG_phGfwPreview__"></textarea>
-              <div class="help-text" style="text-align: right; margin-top: 5px;">
-                __MSG_txtGfwPreviewHint__
-              </div>
-            </div>
-          </div>
+          <div class="source-status"><div><strong>__MSG_lblCurrentStatus__</strong><div id="gfwStatus" class="help-text">__MSG_statusNotLoaded__</div></div><button id="updateGfwBtn" class="btn btn-primary"><span data-icon="refresh" aria-hidden="true"></span>__MSG_btnUpdateGfw__</button></div>
+          <p id="gfwOperationStatus" class="operation-status" role="status" aria-live="polite" hidden></p>
+          <div class="source-preview"><button type="button" id="toggleGfwPreviewBtn" class="preview-toggle" aria-expanded="false" aria-controls="gfwPreviewArea"><span>__MSG_btnGfwPreview__</span><span id="gfwPreviewArrow" data-icon="chevron-down" aria-hidden="true"></span></button><div id="gfwPreviewArea" style="display:none"><label for="gfwContentBox" class="sr-only">__MSG_btnGfwPreview__</label><textarea id="gfwContentBox" class="log-viewer" readonly placeholder="__MSG_phGfwPreview__"></textarea><p class="help-text">__MSG_txtGfwPreviewHint__</p></div></div>
         </div>
       </div>
-
-      <!-- 云端备份 -->
       <div id="section-sync" class="section">
-        <h2>__MSG_titleSync__ <span id="syncStatusBadge" class="server-tag" style="background:#ccc; color:#fff; margin-left:10px;">__MSG_statusNotBacked__</span></h2>
+        <header class="section-heading"><h2>__MSG_titleSync__</h2><span id="syncStatusBadge" class="server-tag">__MSG_statusNotBacked__</span></header>
         <div class="card">
-          <div class="form-group">
-            <label>__MSG_lblProvider__</label>
-            <div style="display:flex; gap:15px;">
-              <select id="syncProvider" style="flex:1">
-                <option value="github">__MSG_optGithub__</option>
-                <option value="webdav">__MSG_optWebdav__</option>
-              </select>
-              <div style="display:flex; align-items:center;">
-                <input type="checkbox" id="autoSync" style="width:auto; margin-right:8px;">
-                <span style="font-size:13px;">__MSG_cbAutoSync__</span>
-              </div>
-            </div>
-          </div>
-          
-          <div class="info-tip" style="background:var(--bg-body); color:var(--text-sub); border:1px solid var(--border);">
-            __MSG_txtSyncTip__
-          </div>
-
-          <div id="panelGithub" style="background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
-            <div class="form-group">
-              <label>__MSG_lblToken__</label>
-              <input type="password" id="gitToken" placeholder="ghp_xxxxxxxxxxxx...">
-              <p class="help-text">__MSG_txtTokenHint__</p>
-            </div>
-          </div>
-
-          <div id="panelWebdav" style="display:none; background:var(--bg-body); padding:20px; border-radius:var(--radius-sm); margin-bottom:20px;">
-            <div class="form-group"><label>__MSG_lblServerAddr__</label><input type="text" id="davUrl" placeholder="https://dav.jianguoyun.com/dav/"></div>
-            <div style="display:flex; gap:10px;">
-              <div style="flex:1"><label>__MSG_lblAccount__</label><input type="text" id="davUser"></div>
-              <div style="flex:1"><label>__MSG_lblPassword__</label><input type="password" id="davPass"></div>
-            </div>
-          </div>
-
-          <div style="display:flex; justify-content:center; gap:20px;">
-             <button id="cloudUploadBtn" class="btn btn-primary" style="width:160px; justify-content:center;">__MSG_btnUpload__</button>
-             <button id="cloudDownloadBtn" class="btn btn-ghost" style="width:160px; justify-content:center;">__MSG_btnDownload__</button>
-          </div>
+          <div class="form-group"><label for="syncProvider">__MSG_lblProvider__</label><div class="provider-row"><select id="syncProvider"><option value="github">__MSG_optGithub__</option><option value="webdav">__MSG_optWebdav__</option></select><label class="checkbox-label" for="autoSync"><input type="checkbox" id="autoSync">__MSG_cbAutoSync__</label></div></div>
+          <p class="info-tip muted-tip">__MSG_txtSyncTip__</p>
+          <div id="panelGithub" class="provider-panel"><div class="form-group"><label for="gitToken">__MSG_lblToken__</label><input type="password" id="gitToken" placeholder="ghp_xxxxxxxxxxxx…" autocomplete="off"><p class="help-text">__MSG_txtTokenHint__</p></div></div>
+          <div id="panelWebdav" class="provider-panel" style="display:none"><div class="form-group"><label for="davUrl">__MSG_lblServerAddr__</label><input type="text" id="davUrl" placeholder="https://dav.jianguoyun.com/dav/" spellcheck="false"></div><div class="form-grid"><div><label for="davUser">__MSG_lblAccount__</label><input type="text" id="davUser" autocomplete="off"></div><div><label for="davPass">__MSG_lblPassword__</label><input type="password" id="davPass" autocomplete="off"></div></div></div>
+          <p class="help-text backup-draft-hint">__MSG_txtBackupDraftHint__</p>
+          <div class="actions"><button id="saveSyncSettingsBtn" class="btn btn-ghost"><span data-icon="check" aria-hidden="true"></span>__MSG_btnSaveBackupSettings__</button><button id="cloudUploadBtn" class="btn btn-primary"><span data-icon="upload" aria-hidden="true"></span>__MSG_btnUpload__</button><button id="cloudDownloadBtn" class="btn btn-ghost"><span data-icon="download" aria-hidden="true"></span>__MSG_btnDownload__</button><button id="cloudUndoBtn" class="btn btn-ghost" disabled><span data-icon="undo" aria-hidden="true"></span>__MSG_btnRestoreUndo__</button></div>
+          <div class="cloud-feedback"><p id="cloudOperationStatus" class="operation-status" role="status" aria-live="polite" hidden></p><button id="cloudRetryBtn" class="btn btn-ghost btn-sm" hidden><span data-icon="refresh" aria-hidden="true"></span>__MSG_btnRetry__</button></div><p class="help-text">__MSG_txtRestoreUndoHint__</p>
         </div>
       </div>
-
-      <!-- 通用设置 -->
       <div id="section-about" class="section">
-        <h2>__MSG_titleGeneral__</h2>
-
-        <div class="card" style="text-align:center; padding: 40px 24px;">
-          <img src="../assets/icon.png" style="width: 64px; height: 64px; margin-bottom: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-          <h3 style="margin: 0 0 8px 0; font-size: 22px; color: var(--text-main);">__MSG_appName__</h3>
-          <div style="font-size: 14px; color: var(--text-sub); margin-bottom: 24px;">
-            __MSG_txtAppDesc__ <span id="aboutVersion">v...</span>
-          </div>
-          
-          <p style="font-size: 14px; line-height: 1.6; color: var(--text-sub); max-width: 600px; margin: 0 auto 32px auto;">
-            __MSG_txtAppFullDesc__
-          </p>
-      
-          <div style="display: flex; justify-content: center; gap: 16px; margin-bottom: 32px;">
-            <a href="https://github.com/DMSQ-creator/ProxySwitch" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
-              <span style="font-size: 18px;">🐙</span> __MSG_btnGithub__
-            </a>
-            <a href="https://github.com/DMSQ-creator/ProxySwitch/issues" target="_blank" class="btn btn-ghost" style="padding: 8px 20px;">
-              <span style="font-size: 18px;">🐛</span> __MSG_btnIssue__
-            </a>
-          </div>
-      
-          <div style="border-top: 1px solid var(--border); padding-top: 24px; font-size: 12px; color: var(--text-sub); line-height: 1.5;">
-            <p style="margin: 0;">__MSG_txtCopyright__</p>
-            <p style="margin: 4px 0 0 0;">
-              __MSG_txtMadeWith__ 
-              License: <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: var(--primary); text-decoration: none;">MIT License</a>
-            </p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="form-group">
-            <label>__MSG_lblTheme__</label>
-            <select id="themeSelect">
-              <option value="system">__MSG_optSystem__</option>
-              <option value="light">__MSG_optLight__</option>
-              <option value="dark">__MSG_optDark__</option>
-            </select>
-          </div>
-        </div>
-        <div class="card form-group">
-          <label>Language / 语言设置</label>
-          <select id="langSelect">
-            <option value="auto">🌐 Auto (Follow System)</option>
-            <option value="zh_CN">🇨🇳 简体中文</option>
-            <option value="en">🇺🇸 English</option>
-            <option value="ru">🇷🇺 Русский (Russian)</option>
-            <option value="es">🇪🇸 Español (Spanish)</option>
-          </select>
-        </div>
-        <div class="card">
-          <h3 style="margin-top:0;">__MSG_titleErrorLog__</h3>
-          <p class="help-text" style="margin-bottom:12px;">__MSG_txtErrorLogHint__</p>
-          <div class="log-toolbar">
-            <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; font-weight:500; color:var(--text-main); display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="checkbox" id="errorLogVerbose" style="width:auto;">
-              __MSG_cbErrorLogVerbose__
-            </label>
-            <div class="log-actions">
-              <button type="button" id="copyErrorLogsBtn" class="btn btn-ghost btn-sm">__MSG_btnCopyLogs__</button>
-              <button type="button" id="clearErrorLogsBtn" class="btn btn-ghost btn-sm" style="color:var(--danger);">__MSG_btnClearLogs__</button>
-            </div>
-          </div>
-          <textarea id="errorLogBox" class="log-viewer" readonly spellcheck="false" placeholder="__MSG_phErrorLogEmpty__"></textarea>
-        </div>
-        <div class="card" style="border-color:rgba(239, 68, 68, 0.3);">
-          <h3 style="color:var(--danger); margin-top:0;">__MSG_titleDanger__</h3>
-          <p class="help-text" style="margin-bottom:15px;">__MSG_txtDangerHint__</p>
-          <button id="resetAppBtn" class="btn btn-danger">__MSG_btnReset__</button>
-        </div>
+        <header class="section-heading"><div><h2>__MSG_titleGeneral__</h2><p class="help-text">__MSG_txtSettingsComfort__</p></div></header>
+        <div class="card"><h3>__MSG_titleAppearance__</h3><div class="form-grid"><div class="form-group"><label for="themeSelect">__MSG_lblTheme__</label><select id="themeSelect"><option value="system">__MSG_optSystem__</option><option value="light">__MSG_optLight__</option><option value="dark">__MSG_optDark__</option></select></div><div class="form-group"><label for="langSelect">__MSG_lblLanguage__</label><select id="langSelect"><option value="auto">__MSG_optLanguageAuto__</option><option value="zh_CN">简体中文</option><option value="en">English</option><option value="ru">Русский</option><option value="es">Español</option></select></div></div><p id="generalOperationStatus" class="operation-status" role="status" aria-live="polite" hidden></p></div>
+        <div class="card"><h3>__MSG_titleErrorLog__</h3><p class="help-text">__MSG_txtErrorLogHint__</p><div class="log-toolbar"><label class="checkbox-label" for="errorLogVerbose"><input type="checkbox" id="errorLogVerbose">__MSG_cbErrorLogVerbose__</label><div class="actions"><button type="button" id="copyErrorLogsBtn" class="btn btn-ghost btn-sm"><span data-icon="copy" aria-hidden="true"></span>__MSG_btnCopyLogs__</button><button type="button" id="clearErrorLogsBtn" class="btn btn-ghost btn-sm text-danger"><span data-icon="trash" aria-hidden="true"></span>__MSG_btnClearLogs__</button></div></div><label class="sr-only" for="errorLogBox">__MSG_titleErrorLog__</label><textarea id="errorLogBox" class="log-viewer" readonly spellcheck="false" placeholder="__MSG_phErrorLogEmpty__"></textarea></div>
+        <div class="card about-card"><div class="about-brand"><img src="../assets/icon.png" width="40" height="40" alt=""><div><h3>__MSG_titleAbout__</h3><p class="help-text">__MSG_appName__ <span id="aboutVersion">v…</span></p></div></div><p class="help-text">__MSG_txtAppFullDesc__</p><div class="actions"><a href="https://github.com/DMSQ-creator/ProxySwitch" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm"><span data-icon="external" aria-hidden="true"></span>__MSG_btnGithub__</a><a href="https://github.com/DMSQ-creator/ProxySwitch/issues" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm"><span data-icon="info" aria-hidden="true"></span>__MSG_btnIssue__</a></div><p class="help-text copyright">__MSG_txtCopyright__ · <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener noreferrer">MIT License</a></p></div>
+        <div class="card danger-card"><h3>__MSG_titleDanger__</h3><p class="help-text">__MSG_txtDangerHint__</p><button id="resetAppBtn" class="btn btn-danger"><span data-icon="trash" aria-hidden="true"></span>__MSG_btnReset__</button></div>
       </div>
-
     </div>
   </main>
-
-  <div id="toast">__MSG_msgSaved__</div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="configurationPreview" class="configuration-preview" aria-labelledby="configurationPreviewTitle" aria-describedby="configurationPreviewText"><h3 id="configurationPreviewTitle"></h3><pre id="configurationPreviewText"></pre><div class="actions align-end"><button id="configurationPreviewCancel" type="button" class="btn btn-ghost">__MSG_btnCancel__</button><button id="configurationPreviewConfirm" type="button" class="btn btn-primary">__MSG_btnConfirmRestore__</button></div></dialog>
+  <script src="../js/ui.js"></script>
   <script src="../js/utils.js"></script>
   <script src="../js/logger.js"></script>
+  <script src="../js/configuration.js"></script>
   <script src="../js/options.js"></script>
 </body>
 </html>

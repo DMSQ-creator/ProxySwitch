@@ -1,0 +1,73 @@
+/* Shared, local-only presentation tokens for all extension pages. */
+:root {
+  color-scheme: light;
+  --primary: #245cbe;
+  --primary-hover: #1c4d9f;
+  --on-primary: #ffffff;
+  --primary-light: #eaf1fc;
+  --bg-body: #f6f7f9;
+  --bg-card: #ffffff;
+  --bg-sidebar: #ffffff;
+  --text-main: #1e293b;
+  --text-sub: #5a687b;
+  --border: #e2e7ee;
+  --surface-muted: #eef2f6;
+  --success: #186c4c;
+  --success-bg: #eef8f2;
+  --warning: #85521c;
+  --warning-bg: #fff5e7;
+  --danger: #b52e3b;
+  --danger-bg: #fff0f1;
+  --purple: var(--primary);
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow-sm: 0 1px 2px rgba(38, 52, 75, .05);
+  --shadow-card: 0 1px 3px rgba(38, 52, 75, .06);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --primary: #9bc6ff;
+  --primary-hover: #aad0ff;
+  --on-primary: #122a49;
+  --primary-light: #223854;
+  --bg-body: #12171f;
+  --bg-card: #1b222d;
+  --bg-sidebar: #1b222d;
+  --text-main: #edf1f7;
+  --text-sub: #acb8c9;
+  --border: #35404e;
+  --surface-muted: #252e3b;
+  --success: #92d9b8;
+  --success-bg: #20392e;
+  --warning: #efc68e;
+  --warning-bg: #3b3023;
+  --danger: #ffadb4;
+  --danger-bg: #3e252d;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .14);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .16);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --primary: #9bc6ff; --primary-hover: #aad0ff; --on-primary: #122a49; --primary-light: #223854;
+    --bg-body: #12171f; --bg-card: #1b222d; --bg-sidebar: #1b222d;
+    --text-main: #edf1f7; --text-sub: #acb8c9; --border: #35404e; --surface-muted: #252e3b;
+    --success: #92d9b8; --success-bg: #20392e; --warning: #efc68e; --warning-bg: #3b3023;
+    --danger: #ffadb4; --danger-bg: #3e252d;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .14); --shadow-card: 0 1px 3px rgba(0, 0, 0, .16);
+  }
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { font-family: "Segoe UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; }
+button, input, select, textarea { font-family: inherit; }
+button, select { cursor: pointer; }
+button:disabled, select:disabled { cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible, summary:focus-visible, [role="button"]:focus-visible {
+  outline: 2px solid var(--primary); outline-offset: 3px;
+}
+.ui-icon { width: 18px; height: 18px; display: inline-block; vertical-align: middle; flex: 0 0 18px; }
+[data-icon] { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

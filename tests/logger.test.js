@@ -230,6 +230,30 @@ test('page context without localStorage never writes through the worker backend'
   assert.equal(backend.stats.setCalls.length, 0);
 });
 
+test('ordinary cloud timing logs persist with verbose logging disabled without console warnings', async () => {
+  const backend = createFakeChrome({ errorLogVerbose: false });
+  const pageStorage = new MemoryLocalStorage();
+  const { context, PSL } = createLoggerContext({ chrome: backend.chrome, localStorage: pageStorage, pathname: '/html/options.html' });
+  const output = { log: [], warn: [], error: [] };
+  context.console = {
+    log: (...args) => output.log.push(args),
+    warn: (...args) => output.warn.push(args),
+    error: (...args) => output.error.push(args),
+  };
+
+  assert.equal(await PSL.info('options', 'MANUAL_SYNC_PREVIEW 1457ms', 'result=success'), true);
+  const logs = await PSL.getLogs();
+
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].level, 'info');
+  assert.equal(logs[0].message, 'MANUAL_SYNC_PREVIEW 1457ms');
+  assert.equal(logs[0].detail, 'result=success');
+  assert.equal(output.log.length, 1);
+  assert.equal(output.warn.length, 0);
+  assert.equal(output.error.length, 0);
+  assert.equal(backend.stats.setCalls.length, 0, 'page timing records must not wake the worker');
+});
+
 test('two popup contexts append concurrently with unique keys and no read-modify-write loss', async () => {
   const backend = createFakeChrome();
   const pageStorage = new MemoryLocalStorage();

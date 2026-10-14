@@ -75,3 +75,23 @@ test('normalization does not broaden existing leading-dot rules',()=>{
   assert.equal(routing.evaluate('hidden.example',rules).route,'direct');
   assert.equal(routing.evaluate('xn--fiq228c.com',rules).route,'proxy');
 });
+
+test('HTTPS proxy servers retain TLS transport in generated PAC',()=>{
+  const context=vm.createContext({});
+  vm.runInContext(routing.buildPac({host:'proxy.example',port:443,scheme:'HTTPS'},prepared,null),context);
+  assert.equal(context.FindProxyForURL('https://site.example','site.example'),'HTTPS proxy.example:443; DIRECT');
+});
+
+test('public IPv6 is routable while loopback, link-local and private IPv6 bypass the proxy',()=>{
+  const rules=routing.prepare({userRules:['*']});
+  const context=vm.createContext({});
+  vm.runInContext(routing.buildPac(server,rules,null),context);
+  for(const host of ['2001:4860:4860::8888','[2606:4700:4700::1111]','2001:db8::1']){
+    assert.equal(routing.localHost(host),false,host);
+    assert.match(context.FindProxyForURL('',host),/^PROXY /,host);
+  }
+  for(const host of ['::1','[::1]','0:0:0:0:0:0:0:1','::','fc00::1','fd12:3456::1','fe80::1','febf::1','::ffff:192.168.1.2']){
+    assert.equal(routing.localHost(host),true,host);
+    assert.equal(context.FindProxyForURL('',host),'DIRECT',host);
+  }
+});
